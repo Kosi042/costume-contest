@@ -7,6 +7,6 @@
     "test": "node run_contract.mjs"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "latest"
+    "@electric-sql/pglite": "0.5.11"
   }
 }

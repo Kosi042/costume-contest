@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
 // A disposable in-memory PostgreSQL build; no extension is needed.
@@ -36,15 +36,22 @@ try {
   const version = await db.query('select version() as version');
   console.log(`Test engine: ${version.rows[0].version}`);
 
-  const migration = await readFile(
-    new URL('../migrations/202610240001_costume_contest.sql', import.meta.url),
-    'utf8',
-  );
-  await db.exec(migration);
-  console.log('PASS: application migration executed unchanged.');
+  const migrationsDir = new URL('../migrations/', import.meta.url);
+  const migrations = (await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort();
+  for (const name of migrations) {
+    await db.exec(await readFile(new URL(name, migrationsDir), 'utf8'));
+    console.log(`PASS: migration ${name} executed unchanged.`);
+  }
+  const deadline = await db.query(`
+    select reveal_at = timestamptz '2026-10-31 19:00:00+00' as requested_deadline
+    from contest_private.contest where singleton
+  `);
+  assert.equal(deadline.rows[0].requested_deadline, true);
 
-  const contract = await readFile(new URL('./contest_contract.sql', import.meta.url), 'utf8');
-  await db.exec(contract);
+  for (const name of ['contest_contract.sql', 'secret_reveal_contract.sql']) {
+    await db.exec(await readFile(new URL(name, import.meta.url), 'utf8'));
+    console.log(`PASS: SQL suite ${name} executed unchanged.`);
+  }
 
   // The suite must actually roll back, including its test user and organizer.
   const rollback = await db.query(`
@@ -54,10 +61,13 @@ try {
       (select count(*)::integer from contest_private.participants) as participants,
       (select count(*)::integer from contest_private.ballots) as ballots,
       (select count(*)::integer from contest_private.votes) as votes,
-      (select stage from contest_private.contest) as stage
+      (select stage from contest_private.contest) as stage,
+      (select reveal_at = timestamptz '2026-10-31 19:00:00+00'
+        from contest_private.contest) as requested_deadline
   `);
   assert.deepEqual(rollback.rows[0], {
-    users: 0, owners: 0, participants: 0, ballots: 0, votes: 0, stage: 'registration',
+    users: 0, owners: 0, participants: 0, ballots: 0, votes: 0,
+    stage: 'registration', requested_deadline: true,
   });
   console.log('PASS: rollback removed every contract-test fixture.');
   console.log('All database contract tests passed. Concurrent transaction behavior requires a full PostgreSQL/Supabase run.');

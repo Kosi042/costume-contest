@@ -145,6 +145,99 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a guest can keep a costume secret without hiding their name',
+      (tester) async {
+    final service = DemoContestService(now: () => DateTime.utc(2026, 10, 24));
+    await service.loginAdmin('', '');
+    await service.setStage(ContestStage.registration);
+    await service.logoutAdmin();
+    await open(tester, width: 320, service: service);
+    await enterName(tester, 'Taylor');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Your costume'), 'Paper Dragon');
+    await tapText(tester, 'Keep my costume secret');
+    await tapText(tester, 'Enter my costume');
+    expect(find.textContaining('31 October 2026 at 20:00 CET'), findsWidgets);
+    await tapText(tester, 'Yes, that’s me');
+    final entry = (await service.fetchContest()).costumes.last;
+    expect(entry.username, 'Taylor');
+    expect(entry.titleHidden, isTrue);
+    expect(find.text('Paper Dragon'), findsNothing);
+    expect(find.text('Secret costume'), findsOneWidget);
+    await tapText(tester, 'Sign out');
+    await enterName(tester, 'Taylor');
+    expect(find.text('Paper Dragon'), findsNothing);
+    expect(
+        find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.text('Secret costume')),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('costume reveals from server time without a manual refresh',
+      (tester) async {
+    var now = DateTime.utc(2026, 10, 31, 18, 59, 55);
+    final service = DemoContestService(now: () => now);
+    await service.loginAdmin('', '');
+    await service.setStage(ContestStage.registration);
+    await service.registerParticipant('Taylor', 'Paper Dragon',
+        hideUntilReveal: true);
+    await service.logoutAdmin();
+    await open(tester, service: service);
+    expect(find.text('Paper Dragon'), findsNothing);
+    expect(find.text('Secret costume'), findsOneWidget);
+    now = DateTime.utc(2026, 10, 31, 19);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text('Paper Dragon'), findsOneWidget);
+    expect(find.text('Secret costume'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('host sees secrets and confirms deletion during registration',
+      (tester) async {
+    final service = DemoContestService(now: () => DateTime.utc(2026, 10, 24));
+    await service.loginAdmin('', '');
+    await service.setStage(ContestStage.registration);
+    await service.registerParticipant('Taylor', 'Paper Dragon',
+        hideUntilReveal: true);
+    await open(tester, width: 320, service: service);
+    await tapText(tester, 'Host');
+    expect(find.text('Paper Dragon · Taylor'), findsOneWidget);
+    final openVoting = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Close registration & open voting'));
+    expect(openVoting.onPressed, isNull);
+    await tapText(tester, 'Delete Taylor’s entry');
+    await tapText(tester, 'Keep entry');
+    expect((await service.fetchContest()).costumes.length, 7);
+    await tapText(tester, 'Delete Taylor’s entry');
+    await tapText(tester, 'Delete entry');
+    expect((await service.fetchContest()).costumes.length, 6);
+    expect(find.text('Taylor’s entry deleted.'), findsOneWidget);
+    expect(find.text('Paper Dragon · Taylor'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('host cannot delete entries after a ballot has been received',
+      (tester) async {
+    final service = DemoContestService();
+    final entries = (await service.fetchContest()).costumes;
+    await service.submitBallot(
+        'Alex', entries.skip(1).take(3).map((c) => c.id).toList());
+    await service.loginAdmin('', '');
+    await open(tester, service: service);
+    await tapText(tester, 'Host');
+    expect(find.textContaining('Delete Alex'), findsNothing);
+    expect(find.text('Entry deletion is locked because voting has started.'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   for (final width in [320.0, 1200.0]) {
     testWidgets(
         'name form and confirmation fit a ${width.toInt()} pixel viewport',

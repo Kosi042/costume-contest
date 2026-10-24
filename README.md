@@ -10,6 +10,10 @@ Contestants enter their name and costume, then choose their name and confirm **�
 
 Names are compared after normalizing capitalization and extra spaces, so changing those cannot create a duplicate entry. People with the same real name should include a surname or recognizable nickname.
 
+Registration is open now. Guests may select **Keep my costume secret**: their name stays visible, while their costume title stays hidden from guests until **31 October 2026 at 20:00 CET (19:00 UTC)**. The host can see all costume titles. The server controls the reveal, and open pages refresh automatically at the deadline. Voting remains a host action and cannot open while any secret costume is still hidden.
+
+Entries and votes are stored persistently in Supabase. They do not expire at 23:30 on 31 October, and this app has no automatic deletion schedule. The free plan can pause projects after a week of low activity; check the live site and Supabase dashboard before the event. See [Supabase's pausing guidance](https://supabase.com/docs/guides/platform/free-project-pausing).
+
 ## Try the local demo
 
 Install [Flutter](https://docs.flutter.dev/get-started/install) and Chrome or Edge. This project uses Flutter **3.44.1** in deployment. In the project folder, run these commands in PowerShell, Terminal, or another shell:
@@ -26,7 +30,7 @@ Demo mode uses sample data in memory. It does not save real entries or votes. A 
 ## Set up the private backend
 
 1. Create a [Supabase project](https://supabase.com/dashboard) and save its database password privately.
-2. In the project's SQL editor, run the complete contents of [`supabase/migrations/202610240001_costume_contest.sql`](supabase/migrations/202610240001_costume_contest.sql) once, in a new project. It creates the private tables and the narrowly permitted app functions.
+2. In the project's SQL editor, apply the files in `supabase/migrations/` once each, in filename order. The first creates the private tables and app functions; `202610240002_secret_reveal_and_entry_deletion.sql` adds the timed reveal and host entry deletion. For an existing project, apply only migrations that have not already been applied, before publishing the matching frontend.
 3. In **Authentication → Users**, create your organizer user with an email address and strong password. Confirm the user's email when creating the user. Copy its user UUID.
 4. Disable **Allow new users to sign up** in [Authentication settings](https://supabase.com/docs/guides/auth/general-configuration). Attendees use their names and do not need Auth accounts. Keep email/password sign-in enabled for your organizer account only.
 5. In the SQL editor, replace the placeholder below with your organizer user's UUID and run:
@@ -82,9 +86,11 @@ The name confirmation helps prevent accidental selection; it does not authentica
 
 Registration can reopen only before the first ballot is submitted; closed voting can be resumed. There is no reset button that erases an event.
 
+To remove a mistaken entry, open **Host sign in → The results**, choose **Delete [name]'s entry**, and confirm. Deletion is available only while registration is open and no ballots have been submitted. It removes that contestant and costume, freeing the name to register again. If voting was opened but nobody has voted, reopen registration first. Once a ballot exists, deletion is locked to protect the results.
+
 ## What stays private
 
-Entrant names and costume names are public. Other attendees cannot see vote totals or who voted for whom. The organizer view shows aggregate results, not individual ballots, and only an email/password account on the owner allowlist can access it.
+Entrant names are public. Costume names are public unless their entrant chooses the timed secret option; those titles are omitted from public responses until the reveal time. Returning with an entrant's name does not expose their secret costume. The organizer view can see secret titles and aggregate results, not individual ballots, and only an email/password account on the owner allowlist can access it. Other attendees cannot see vote totals or who voted for whom.
 
 This provides privacy within the app, not cryptographic anonymity from the database owner. The underlying database links ballots to participant records to enforce the voting rules, so someone with full database access can inspect those links. Do not promise voters otherwise.
 
@@ -111,6 +117,6 @@ flutter build web --release --no-web-resources-cdn --dart-define-from-file=confi
 
 The resulting website is in `build/web`. Serve that folder with a local web server to inspect a release build; opening `index.html` directly is insufficient. For a manual project-site build, also pass `--base-href=/REPOSITORY/`.
 
-The database contract test is [`supabase/tests/contest_contract.sql`](supabase/tests/contest_contract.sql). Run it in the SQL editor of a fresh development project after applying the migration. It tests access controls and voting rules and rolls back its fixtures. Do not run it during a real event; it temporarily locks and hides contest data inside its transaction.
+The database contract tests are [`supabase/tests/contest_contract.sql`](supabase/tests/contest_contract.sql) and [`supabase/tests/secret_reveal_contract.sql`](supabase/tests/secret_reveal_contract.sql). Run them in a development project after applying the migrations. They test access controls, voting rules, the reveal boundary, and guarded deletion, and roll back their fixtures. Do not run them during a real event; they temporarily lock and hide contest data inside their transactions.
 
 The deployment helper `scripts/prepare_deploy.py` can also create the ignored JSON file from local environment variables. It validates that the key is suitable for a public client, writes JSON safely, and never prints the key. In GitHub Actions it writes the configuration outside the published artifact and computes the correct Pages path.

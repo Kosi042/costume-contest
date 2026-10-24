@@ -278,6 +278,187 @@ void main() {
     });
   });
 
+  group('Secret costumes and entry deletion', () {
+    final revealAt = DateTime.utc(2026, 10, 31, 19);
+
+    test('public titles stay masked until the exact server reveal time',
+        () async {
+      var now = revealAt.subtract(const Duration(seconds: 1));
+      final service = DemoContestService(now: () => now);
+      addTearDown(service.dispose);
+      await service.loginAdmin('', '');
+      await service.setStage(ContestStage.registration);
+      final participant = await service.registerParticipant(
+          'Taylor Moon', 'Quantum Pumpkin',
+          hideUntilReveal: true);
+      final before = await service.fetchContest();
+      final hidden = before.costumes
+          .singleWhere((entry) => entry.id == participant.costumeId);
+      expect(hidden.username, 'Taylor Moon');
+      expect(hidden.title, 'Secret costume');
+      expect(hidden.titleHidden, isTrue);
+      expect(
+          before.costumes
+              .where((entry) => entry.id != participant.costumeId)
+              .every((entry) => !entry.titleHidden),
+          isTrue);
+      expect(before.revealAt, revealAt);
+      expect(before.serverTime, now);
+      expect(before.revealPending, isTrue);
+      expect(before.hasHiddenCostumes, isTrue);
+      final hostBefore = await service.fetchAdmin();
+      final hostHidden = hostBefore.results
+          .singleWhere((entry) => entry.id == participant.costumeId);
+      expect(hostHidden.title, 'Quantum Pumpkin');
+      expect(hostHidden.titleHidden, isTrue);
+      expect(hostBefore.revealPending, isTrue);
+      await expectLater(service.setStage(ContestStage.voting),
+          _failsWith('secret costumes are hidden'));
+      expect((await service.fetchContest()).stage, ContestStage.registration);
+
+      now = revealAt;
+      final atReveal = await service.fetchContest();
+      final revealed = atReveal.costumes
+          .singleWhere((entry) => entry.id == participant.costumeId);
+      expect(revealed.title, 'Quantum Pumpkin');
+      expect(revealed.titleHidden, isFalse);
+      expect(atReveal.revealPending, isFalse);
+      expect(atReveal.hasHiddenCostumes, isFalse);
+      expect(atReveal.serverTime, revealAt);
+      final hostAtReveal = await service.fetchAdmin();
+      expect(hostAtReveal.revealPending, isFalse);
+      expect(hostAtReveal.hasHiddenCostumes, isFalse);
+      await service.setStage(ContestStage.voting);
+      final choices = atReveal.costumes
+          .where((entry) => entry.id != participant.costumeId)
+          .take(3)
+          .map((entry) => entry.id)
+          .toList();
+      await service.submitBallot('Taylor Moon', choices);
+      expect((await service.fetchAdmin()).ballotCount, 1);
+      now = revealAt.add(const Duration(days: 1));
+      expect(
+          (await service.fetchContest())
+              .costumes
+              .singleWhere((entry) => entry.id == participant.costumeId)
+              .title,
+          'Quantum Pumpkin');
+    });
+
+    test('ballot submissions independently check the reveal deadline',
+        () async {
+      var now = revealAt;
+      final service = DemoContestService(now: () => now, revealAt: revealAt);
+      addTearDown(service.dispose);
+      await service.loginAdmin('', '');
+      await service.setStage(ContestStage.registration);
+      final participant = await service.registerParticipant(
+          'Taylor', 'Quantum Pumpkin',
+          hideUntilReveal: true);
+      await service.setStage(ContestStage.voting);
+      final choices = (await service.fetchContest())
+          .costumes
+          .where((entry) => entry.id != participant.costumeId)
+          .take(3)
+          .map((entry) => entry.id)
+          .toList();
+      // Simulate a stale voting-stage snapshot while the authoritative clock
+      // says a secret title is still hidden. Submission must recheck the rule.
+      now = revealAt.subtract(const Duration(milliseconds: 1));
+      await expectLater(service.submitBallot('Taylor', choices),
+          _failsWith('Voting is paused'));
+      expect((await service.loginParticipant('Taylor')).hasVoted, isFalse);
+      expect((await service.fetchAdmin()).ballotCount, 0);
+    });
+
+    test('host deletion removes hidden entries and releases their names safely',
+        () async {
+      final service = DemoContestService(
+          now: () => revealAt.subtract(const Duration(days: 1)));
+      addTearDown(service.dispose);
+      final initial = await service.fetchContest();
+      await expectLater(service.deleteEntry(initial.costumes.first.id),
+          _failsWith('demo host'));
+      await service.loginAdmin('', '');
+      await expectLater(service.deleteEntry(initial.costumes.first.id),
+          _failsWith('registration is open'));
+      await service.setStage(ContestStage.registration);
+      final secret = await service.registerParticipant(
+          'Taylor Moon', 'Quantum Pumpkin',
+          hideUntilReveal: true);
+      await service.deleteEntry(secret.costumeId!);
+      expect((await service.loginParticipant('taylor   moon')).isRegistered,
+          isFalse);
+      expect((await service.fetchContest()).hasHiddenCostumes, isFalse);
+      expect((await service.fetchAdmin()).registeredCount,
+          initial.costumes.length);
+      await expectLater(service.deleteEntry(secret.costumeId!),
+          _failsWith('no longer exists'));
+
+      // Deleting a middle entry then registering must not reuse another ID.
+      await service.deleteEntry(initial.costumes[1].id);
+      final replacement =
+          await service.registerParticipant('Taylor Moon', 'Solar Witch');
+      expect(replacement.costumeId, isNot(secret.costumeId));
+      final remaining = (await service.fetchContest()).costumes;
+      expect(remaining.map((entry) => entry.id).toSet(),
+          hasLength(remaining.length));
+      expect(
+          remaining
+              .singleWhere((entry) => entry.id == replacement.costumeId)
+              .title,
+          'Solar Witch');
+      await service.setStage(ContestStage.voting);
+    });
+
+    test('deletions cannot bypass minimum entrants or alter submitted ballots',
+        () async {
+      final service = DemoContestService();
+      addTearDown(service.dispose);
+      await service.loginAdmin('', '');
+      await service.setStage(ContestStage.registration);
+      final initial = await service.fetchContest();
+      for (final entry in initial.costumes.skip(3)) {
+        await service.deleteEntry(entry.id);
+      }
+      await expectLater(
+          service.setStage(ContestStage.voting), _failsWith('At least four'));
+      final replacement =
+          await service.registerParticipant('Taylor', 'Moon Witch');
+      await service.setStage(ContestStage.voting);
+      final choices = (await service.fetchContest())
+          .costumes
+          .where((entry) => entry.id != replacement.costumeId)
+          .map((entry) => entry.id)
+          .toList();
+      await service.submitBallot('Taylor', choices);
+      await expectLater(service.deleteEntry(replacement.costumeId!),
+          _failsWith('registration is open'));
+      await service.setStage(ContestStage.closed);
+      await expectLater(service.deleteEntry(replacement.costumeId!),
+          _failsWith('registration is open'));
+      await expectLater(service.setStage(ContestStage.registration),
+          _failsWith('cannot reopen'));
+      expect((await service.fetchAdmin()).ballotCount, 1);
+      expect((await service.fetchAdmin()).registeredCount, 4);
+    });
+
+    test('legacy snapshots default reveal metadata and hidden flags safely',
+        () {
+      final contest =
+          ContestState.fromJson(Map<String, dynamic>.from(_publicData));
+      final host = AdminSnapshot.fromJson(Map<String, dynamic>.from(_hostData));
+      expect(contest.revealAt, isNull);
+      expect(contest.serverTime, isNull);
+      expect(contest.revealPending, isFalse);
+      expect(contest.costumes.single.titleHidden, isFalse);
+      expect(host.revealAt, isNull);
+      expect(host.serverTime, isNull);
+      expect(host.revealPending, isFalse);
+      expect(host.results.single.titleHidden, isFalse);
+    });
+  });
+
   group('Live service boundary', () {
     test('invalid names are rejected before any network request', () async {
       var requests = 0;
@@ -354,6 +535,7 @@ void main() {
       expect(jsonDecode(requests[1].body), {
         'p_username': 'Taylor Moon',
         'p_costume': 'Witch',
+        'p_hide_until_reveal': false,
       });
       expect(jsonDecode(requests[2].body), {
         'p_username': 'Taylor Moon',
@@ -377,7 +559,94 @@ void main() {
           service.setTitle('Party'), _failsWith('Sign in as the host'));
       await expectLater(service.setStage(ContestStage.closed),
           _failsWith('Sign in as the host'));
+      await expectLater(
+          service.deleteEntry('costume-a'), _failsWith('Sign in as the host'));
       expect(requestCount, 0);
+    });
+
+    test(
+        'secret registration and reveal snapshots preserve the server contract',
+        () async {
+      final service = _live((request) async {
+        switch (request.url.path) {
+          case '/auth/v1/token':
+            return _json(_tokens());
+          case '/rest/v1/rpc/register_participant':
+            expect(jsonDecode(request.body), {
+              'p_username': 'Taylor Moon',
+              'p_costume': 'Quantum Pumpkin',
+              'p_hide_until_reveal': true,
+            });
+            return _json(_registeredSession);
+          case '/rest/v1/rpc/contest_public':
+            return _json({
+              ..._publicData,
+              'reveal_at': '2026-10-31T20:00:00+01:00',
+              'server_time': '2026-10-31T18:59:59Z',
+              'costumes': [
+                {
+                  'id': 'costume-a',
+                  'username': 'Taylor Moon',
+                  'title': 'Secret costume',
+                  'title_hidden': true
+                },
+              ],
+            });
+          case '/rest/v1/rpc/admin_snapshot':
+            return _json({
+              ..._hostData,
+              'reveal_at': '2026-10-31T19:00:00Z',
+              'server_time': '2026-10-31T18:59:59Z',
+              'results': [
+                {
+                  'id': 'costume-a',
+                  'username': 'Taylor Moon',
+                  'title': 'Quantum Pumpkin',
+                  'title_hidden': true,
+                  'votes': 0
+                },
+              ],
+            });
+          default:
+            fail('Unexpected request ${request.url.path}');
+        }
+      });
+      await service.registerParticipant(' Taylor   Moon ', ' Quantum Pumpkin ',
+          hideUntilReveal: true);
+      final public = await service.fetchContest();
+      expect(public.costumes.single.username, 'Taylor Moon');
+      expect(public.costumes.single.title, 'Secret costume');
+      expect(public.costumes.single.titleHidden, isTrue);
+      expect(public.hasHiddenCostumes, isTrue);
+      expect(public.revealPending, isTrue);
+      expect(public.revealAt, DateTime.utc(2026, 10, 31, 19));
+      expect(public.serverTime, DateTime.utc(2026, 10, 31, 18, 59, 59));
+      await service.loginAdmin('host@example.com', 'password');
+      final host = await service.fetchAdmin();
+      expect(host.results.single.title, 'Quantum Pumpkin');
+      expect(host.results.single.titleHidden, isTrue);
+      expect(host.hasHiddenCostumes, isTrue);
+      expect(host.revealPending, isTrue);
+    });
+
+    test('entry deletion uses the host token and requires server confirmation',
+        () async {
+      var confirmDeletion = true;
+      final service = _live((request) async {
+        if (request.url.path == '/auth/v1/token') return _json(_tokens());
+        if (request.url.path == '/rest/v1/rpc/admin_snapshot') {
+          return _json(_hostData);
+        }
+        expect(request.url.path, '/rest/v1/rpc/admin_delete_entry');
+        expect(request.headers['Authorization'], 'Bearer owner-access');
+        expect(jsonDecode(request.body), {'p_costume_id': 'costume-a'});
+        return _json({'deleted': confirmDeletion});
+      });
+      await service.loginAdmin('host@example.com', 'password');
+      await service.deleteEntry('costume-a');
+      confirmDeletion = false;
+      await expectLater(service.deleteEntry('costume-a'),
+          _failsWith('did not confirm the deletion'));
     });
 
     test('successful authentication still needs owner authorization', () async {

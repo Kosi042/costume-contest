@@ -24,16 +24,19 @@ class Costume {
     required this.id,
     required this.username,
     required this.title,
+    this.titleHidden = false,
   });
 
   final String id;
   final String username;
   final String title;
+  final bool titleHidden;
 
   factory Costume.fromJson(Map<String, dynamic> json) => Costume(
         id: _string(json, 'id'),
         username: _string(json, 'username'),
         title: _string(json, 'title'),
+        titleHidden: _optionalBool(json, 'title_hidden'),
       );
 }
 
@@ -43,12 +46,20 @@ class ContestState {
     required this.stage,
     required this.votesPerPerson,
     required this.costumes,
+    this.revealAt,
+    this.serverTime,
   });
 
   final String title;
   final ContestStage stage;
   final int votesPerPerson;
   final List<Costume> costumes;
+  final DateTime? revealAt;
+  final DateTime? serverTime;
+
+  bool get revealPending =>
+      revealAt != null && serverTime != null && serverTime!.isBefore(revealAt!);
+  bool get hasHiddenCostumes => costumes.any((costume) => costume.titleHidden);
 
   factory ContestState.fromJson(Map<String, dynamic> json) => ContestState(
         title: _string(json, 'title'),
@@ -57,6 +68,8 @@ class ContestState {
         costumes: List<Costume>.unmodifiable(
           _objects(json, 'costumes').map(Costume.fromJson),
         ),
+        revealAt: _optionalDateTime(json, 'reveal_at'),
+        serverTime: _optionalDateTime(json, 'server_time'),
       );
 }
 
@@ -96,6 +109,7 @@ class CostumeResult extends Costume {
     required super.id,
     required super.username,
     required super.title,
+    super.titleHidden = false,
     required this.votes,
   });
 
@@ -105,6 +119,7 @@ class CostumeResult extends Costume {
         id: _string(json, 'id'),
         username: _string(json, 'username'),
         title: _string(json, 'title'),
+        titleHidden: _optionalBool(json, 'title_hidden'),
         votes: _integer(json, 'votes'),
       );
 }
@@ -117,6 +132,8 @@ class AdminSnapshot {
     required this.registeredCount,
     required this.ballotCount,
     required this.results,
+    this.revealAt,
+    this.serverTime,
   });
 
   final String title;
@@ -125,6 +142,12 @@ class AdminSnapshot {
   final int registeredCount;
   final int ballotCount;
   final List<CostumeResult> results;
+  final DateTime? revealAt;
+  final DateTime? serverTime;
+
+  bool get revealPending =>
+      revealAt != null && serverTime != null && serverTime!.isBefore(revealAt!);
+  bool get hasHiddenCostumes => results.any((costume) => costume.titleHidden);
 
   factory AdminSnapshot.fromJson(Map<String, dynamic> json) => AdminSnapshot(
         title: _string(json, 'title'),
@@ -135,6 +158,8 @@ class AdminSnapshot {
         results: List<CostumeResult>.unmodifiable(
           _objects(json, 'results').map(CostumeResult.fromJson),
         ),
+        revealAt: _optionalDateTime(json, 'reveal_at'),
+        serverTime: _optionalDateTime(json, 'server_time'),
       );
 }
 
@@ -154,6 +179,20 @@ int _integer(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is int) return value;
   throw FormatException('Invalid $key.');
+}
+
+bool _optionalBool(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return false;
+  if (value is bool) return value;
+  throw FormatException('Invalid $key.');
+}
+
+DateTime? _optionalDateTime(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is! String) throw FormatException('Invalid $key.');
+  return DateTime.parse(value).toUtc();
 }
 
 Iterable<Map<String, dynamic>> _objects(

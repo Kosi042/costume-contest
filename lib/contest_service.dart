@@ -50,12 +50,14 @@ abstract class ContestService {
   Future<ParticipantSession> loginParticipant(String username);
   Future<ParticipantSession> registerParticipant(
     String username,
-    String costume,
-  );
+    String costume, {
+    bool hideUntilReveal = false,
+  });
   Future<void> submitBallot(String username, List<String> ids);
   Future<void> loginAdmin(String email, String password);
   Future<void> logoutAdmin();
   Future<AdminSnapshot> fetchAdmin();
+  Future<void> deleteEntry(String costumeId);
   Future<void> setStage(ContestStage stage);
   Future<void> setTitle(String title);
   void dispose();
@@ -108,13 +110,15 @@ class LiveContestService implements ContestService {
   @override
   Future<ParticipantSession> registerParticipant(
     String username,
-    String costume,
-  ) async =>
+    String costume, {
+    bool hideUntilReveal = false,
+  }) async =>
       _parse(
         () async => ParticipantSession.fromJson(
           await _rpc('register_participant', {
             'p_username': _validatedParticipantName(username),
             'p_costume': costume.trim(),
+            'p_hide_until_reveal': hideUntilReveal,
           }),
         ),
       );
@@ -173,6 +177,16 @@ class LiveContestService implements ContestService {
           await _rpc('admin_snapshot', const {}, true),
         ),
       );
+
+  @override
+  Future<void> deleteEntry(String costumeId) async {
+    final response =
+        await _rpc('admin_delete_entry', {'p_costume_id': costumeId}, true);
+    if (response['deleted'] != true) {
+      throw const ServiceException(
+          'The server did not confirm the deletion. Refresh the host view before trying again.');
+    }
+  }
 
   @override
   Future<void> setStage(ContestStage stage) async {
@@ -395,7 +409,9 @@ class LiveContestService implements ContestService {
 /// Explicitly selected preview data. It never contacts the live database and
 /// resets when this instance is discarded or the page is reloaded.
 class DemoContestService implements ContestService {
-  DemoContestService() {
+  DemoContestService({DateTime Function()? now, DateTime? revealAt})
+      : _now = now ?? DateTime.now,
+        _revealAt = (revealAt ?? DateTime.utc(2026, 10, 31, 19)).toUtc() {
     const names = ['Alex', 'Morgan', 'Jamie', 'Casey', 'Riley', 'Sam'];
     const titles = [
       'Disco Wizard',
@@ -415,6 +431,7 @@ class DemoContestService implements ContestService {
         hasVoted: false,
       );
     }
+    _nextParticipantNumber = names.length + 1;
   }
 
   static const _unregistered = ParticipantSession(
@@ -428,6 +445,10 @@ class DemoContestService implements ContestService {
   final List<Costume> _costumes = [];
   final Map<String, ParticipantSession> _participants = {};
   final Map<String, int> _voteTotals = {};
+  final Set<String> _hiddenUntilRevealIds = {};
+  final DateTime Function() _now;
+  final DateTime _revealAt;
+  int _nextParticipantNumber = 1;
   bool _adminAuthenticated = false;
   int _ballotCount = 0;
   static const _votesPerPerson = 3;
@@ -439,12 +460,36 @@ class DemoContestService implements ContestService {
   bool get isAdminAuthenticated => _adminAuthenticated;
 
   @override
-  Future<ContestState> fetchContest() async => ContestState(
-        title: _title,
-        stage: _stage,
-        votesPerPerson: _votesPerPerson,
-        costumes: List<Costume>.unmodifiable(_costumes),
-      );
+  Future<ContestState> fetchContest() async {
+    final serverTime = _now().toUtc();
+    return ContestState(
+      title: _title,
+      stage: _stage,
+      votesPerPerson: _votesPerPerson,
+      costumes: List<Costume>.unmodifiable(_costumes.map((costume) {
+        final hidden = _isTitleHidden(costume.id, serverTime);
+        return Costume(
+            id: costume.id,
+            username: costume.username,
+            title: hidden ? 'Secret costume' : costume.title,
+            titleHidden: hidden);
+      })),
+      revealAt: _revealAt,
+      serverTime: serverTime,
+    );
+  }
+
+  bool _isTitleHidden(String id, DateTime serverTime) =>
+      _hiddenUntilRevealIds.contains(id) && serverTime.isBefore(_revealAt);
+
+  void _requireRevealedCostumes({bool submitting = false}) {
+    if (_hiddenUntilRevealIds.isNotEmpty &&
+        _now().toUtc().isBefore(_revealAt)) {
+      throw ServiceException(submitting
+          ? 'Voting is paused until secret costumes are revealed.'
+          : 'Voting cannot open while secret costumes are hidden.');
+    }
+  }
 
   ParticipantSession _session(String username) =>
       _participants[_validatedParticipantName(username).toLowerCase()] ??
@@ -457,8 +502,9 @@ class DemoContestService implements ContestService {
   @override
   Future<ParticipantSession> registerParticipant(
     String username,
-    String costume,
-  ) async {
+    String costume, {
+    bool hideUntilReveal = false,
+  }) async {
     final name = _validatedParticipantName(username);
     final session = _session(name);
     if (session.isRegistered) {
@@ -474,9 +520,10 @@ class DemoContestService implements ContestService {
         _hasControlCharacters(title)) {
       throw const ServiceException('Use a costume name of 2 to 80 characters.');
     }
-    final number = _costumes.length + 1;
+    final number = _nextParticipantNumber++;
     final id = 'demo-costume-$number';
     _costumes.add(Costume(id: id, username: name, title: title));
+    if (hideUntilReveal) _hiddenUntilRevealIds.add(id);
     final registered = ParticipantSession(
       participantId: 'demo-participant-$number',
       username: name,
@@ -494,6 +541,7 @@ class DemoContestService implements ContestService {
     if (_stage != ContestStage.voting) {
       throw const ServiceException('Voting is not open.');
     }
+    _requireRevealedCostumes(submitting: true);
     if (!session.isRegistered) {
       throw const ServiceException(
           'Register your name and costume before voting.');
@@ -546,11 +594,13 @@ class DemoContestService implements ContestService {
   @override
   Future<AdminSnapshot> fetchAdmin() async {
     _requireAdmin();
+    final serverTime = _now().toUtc();
     final results = _costumes
         .map((entry) => CostumeResult(
               id: entry.id,
               username: entry.username,
               title: entry.title,
+              titleHidden: _isTitleHidden(entry.id, serverTime),
               votes: _voteTotals[entry.id] ?? 0,
             ))
         .toList()
@@ -565,7 +615,29 @@ class DemoContestService implements ContestService {
       registeredCount: _costumes.length,
       ballotCount: _ballotCount,
       results: List<CostumeResult>.unmodifiable(results),
+      revealAt: _revealAt,
+      serverTime: serverTime,
     );
+  }
+
+  @override
+  Future<void> deleteEntry(String costumeId) async {
+    _requireAdmin();
+    if (_stage != ContestStage.registration) {
+      throw const ServiceException(
+          'Entries can only be deleted while registration is open.');
+    }
+    if (_ballotCount != 0) {
+      throw const ServiceException(
+          'Entries cannot be deleted after a ballot has been submitted.');
+    }
+    final index = _costumes.indexWhere((costume) => costume.id == costumeId);
+    if (index < 0) throw const ServiceException('That entry no longer exists.');
+    final deleted = _costumes.removeAt(index);
+    _participants
+        .remove(normalizeParticipantName(deleted.username).toLowerCase());
+    _hiddenUntilRevealIds.remove(deleted.id);
+    _voteTotals.remove(deleted.id);
   }
 
   @override
@@ -580,6 +652,7 @@ class DemoContestService implements ContestService {
       throw const ServiceException(
           'At least four costumes are needed to open voting.');
     }
+    if (stage == ContestStage.voting) _requireRevealedCostumes();
     _stage = stage;
   }
 

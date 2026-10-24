@@ -11,6 +11,37 @@ const lime = Color(0xFFD6EF82);
 const muted = Color(0xFF60706A);
 const line = Color(0xFFDFE3D8);
 
+String _revealLabel(DateTime date) {
+  final cet = date.toUtc().add(const Duration(hours: 1));
+  const months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December'
+  ];
+  final hour = cet.hour.toString().padLeft(2, '0');
+  final minute = cet.minute.toString().padLeft(2, '0');
+  return '${cet.day} ${months[cet.month - 1]} ${cet.year} at $hour:$minute CET';
+}
+
+Duration? _revealDelay(DateTime? revealAt, DateTime? serverTime) {
+  if (revealAt == null ||
+      serverTime == null ||
+      !serverTime.isBefore(revealAt)) {
+    return null;
+  }
+  // Fetch the newly public title from the server; never preload a secret title.
+  return revealAt.difference(serverTime) + const Duration(milliseconds: 150);
+}
+
 void main() => runApp(const CostumeClubApp());
 
 class CostumeClubApp extends StatelessWidget {
@@ -73,7 +104,7 @@ class ContestPage extends StatefulWidget {
   State<ContestPage> createState() => _ContestPageState();
 }
 
-class _ContestPageState extends State<ContestPage> {
+class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
   ContestService? _service;
   ContestState? _contest;
   ParticipantSession? _participant;
@@ -87,17 +118,24 @@ class _ContestPageState extends State<ContestPage> {
   String? _error;
   bool _busy = false;
   bool _loading = true;
+  bool _hideUntilReveal = false;
   Timer? _refreshTimer;
+  Timer? _revealTimer;
   int _sessionEpoch = 0;
+  int _loadEpoch = 0;
 
   bool get _registered => _participant?.isRegistered ?? false;
   bool get _voted => _participant?.hasVoted ?? false;
   bool get _isDemo => _service?.isDemo ?? false;
-  bool get _voting => _contest?.stage == ContestStage.voting;
+  bool get _voting =>
+      _contest?.stage == ContestStage.voting &&
+      !(_contest?.costumes.any((c) => c.titleHidden) ?? false);
+  bool get _revealPending => _contest?.revealPending ?? false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.service != null) {
       _service = widget.service;
     } else if (ServiceConfiguration.isDemoEnabled) {
@@ -117,7 +155,9 @@ class _ContestPageState extends State<ContestPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _revealTimer?.cancel();
     for (final controller in [
       _entryNameController,
       _nameController,
@@ -130,13 +170,21 @@ class _ContestPageState extends State<ContestPage> {
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _service != null) {
+      _load(silent: true);
+    }
+  }
+
   Future<void> _load({bool silent = false}) async {
     final epoch = _sessionEpoch;
+    final loadEpoch = ++_loadEpoch;
     try {
       final contest = await _service!.fetchContest();
       final session =
           _registered ? await _service!.loginParticipant(_username) : null;
-      if (!mounted || epoch != _sessionEpoch) return;
+      if (!mounted || epoch != _sessionEpoch || loadEpoch != _loadEpoch) return;
       setState(() {
         _contest = contest;
         if (session != null) _participant = session;
@@ -144,6 +192,11 @@ class _ContestPageState extends State<ContestPage> {
         _loading = false;
         if (!silent) _error = null;
       });
+      _revealTimer?.cancel();
+      final delay = _revealDelay(contest.revealAt, contest.serverTime);
+      if (delay != null) {
+        _revealTimer = Timer(delay, () => _load(silent: true));
+      }
     } catch (e) {
       if (mounted && !silent) {
         setState(() {
@@ -174,11 +227,14 @@ class _ContestPageState extends State<ContestPage> {
   }
 
   Future<bool> _confirmIdentity(String name, String costume,
-      {bool hasVoted = false, bool registering = false}) async {
+      {bool hasVoted = false,
+      bool registering = false,
+      bool secret = false}) async {
     return await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
                   title: const Text('Is this you?'),
+                  scrollable: true,
                   content: SizedBox(
                       width: 340,
                       child: Column(
@@ -192,6 +248,13 @@ class _ContestPageState extends State<ContestPage> {
                             Text(costume,
                                 style: const TextStyle(
                                     fontSize: 17, color: muted)),
+                            if (secret && _contest?.revealAt != null) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                  'Hidden from guests until ${_revealLabel(_contest!.revealAt!)}. Your name stays visible; the host can see your costume.',
+                                  style: const TextStyle(
+                                      color: muted, height: 1.5)),
+                            ],
                             const SizedBox(height: 20),
                             Text(
                                 hasVoted
@@ -231,7 +294,8 @@ class _ContestPageState extends State<ContestPage> {
           }
           final confirmed = await _confirmIdentity(
               participant.username!, entries.first.title,
-              hasVoted: participant.hasVoted);
+              hasVoted: participant.hasVoted,
+              secret: entries.first.titleHidden);
           if (!confirmed || !mounted || epoch != _sessionEpoch) return;
         }
         setState(() {
@@ -247,15 +311,19 @@ class _ContestPageState extends State<ContestPage> {
     await _action(() async {
       final name = normalizeParticipantName(_nameController.text);
       final costume = _costumeController.text.trim();
-      final confirmed =
-          await _confirmIdentity(name, costume, registering: true);
+      final secret = _hideUntilReveal && _revealPending;
+      final confirmed = await _confirmIdentity(name, costume,
+          registering: true, secret: secret);
       if (!confirmed || !mounted) return;
-      final participant =
-          await _service!.registerParticipant(_nameController.text, costume);
+      final participant = await _service!.registerParticipant(
+          _nameController.text, costume,
+          hideUntilReveal: secret);
       if (!mounted) return;
       setState(() {
         _participant = participant;
         _username = participant.username!;
+        _costumeController.clear();
+        _hideUntilReveal = false;
       });
       await _load();
     });
@@ -267,6 +335,9 @@ class _ContestPageState extends State<ContestPage> {
         _participant = null;
         _selected.clear();
         _entryNameController.clear();
+        _nameController.clear();
+        _costumeController.clear();
+        _hideUntilReveal = false;
         _error = null;
       });
 
@@ -584,7 +655,7 @@ class _ContestPageState extends State<ContestPage> {
               key: _entryForm,
               child: Column(children: [
                 const Text(
-                    'Your name and costume will appear in the lineup. If someone shares your name, add your surname or a nickname.',
+                    'Your name will appear in the lineup. If someone shares your name, add your surname or a nickname.',
                     style: TextStyle(color: muted, height: 1.6)),
                 const SizedBox(height: 20),
                 TextFormField(
@@ -609,6 +680,24 @@ class _ContestPageState extends State<ContestPage> {
                         ? 'Tell us your costume.'
                         : null),
                 const SizedBox(height: 12),
+                if (_revealPending) ...[
+                  Material(
+                    color: Colors.transparent,
+                    child: CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _hideUntilReveal,
+                      onChanged: _busy
+                          ? null
+                          : (value) =>
+                              setState(() => _hideUntilReveal = value ?? false),
+                      title: const Text('Keep my costume secret'),
+                      subtitle: Text(
+                          'Reveal on ${_revealLabel(_contest!.revealAt!)}. Your name stays visible; the host can see your costume.'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 SizedBox(
                     width: double.infinity,
                     child: FilledButton(
@@ -743,6 +832,13 @@ class _ContestPageState extends State<ContestPage> {
               ? 'Tap a costume to add it to your ballot.'
               : 'Big ideas. Excellent disguises. Meet tonight’s lineup.',
           style: const TextStyle(color: muted, height: 1.5)),
+      if (_contest!.costumes.any((c) => c.titleHidden) &&
+          _contest!.revealAt != null)
+        Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(
+                'Secret costumes reveal automatically on ${_revealLabel(_contest!.revealAt!)}.',
+                style: const TextStyle(color: muted, height: 1.5))),
       if (_registered && _voting && !_voted && eligible < 3)
         Padding(
             padding: const EdgeInsets.only(top: 14),
@@ -798,7 +894,12 @@ class _ContestPageState extends State<ContestPage> {
   Widget _costumeCard(Costume costume) {
     final own = costume.id == _participant?.costumeId;
     final selected = _selected.contains(costume.id);
-    final canVote = _registered && _voting && !_voted && !own && !_busy;
+    final canVote = _registered &&
+        _voting &&
+        !_voted &&
+        !own &&
+        !costume.titleHidden &&
+        !_busy;
     final atLimit = !selected && _selected.length >= 3;
     final palette = [
       const Color(0xFFF2C5AE),
@@ -818,6 +919,7 @@ class _ContestPageState extends State<ContestPage> {
     ];
     final seed =
         costume.title.codeUnits.fold<int>(0, (a, b) => a + b) % palette.length;
+    final icon = costume.titleHidden ? Icons.lock_outline : icons[seed];
     void toggle() {
       if (!canVote || atLimit) return;
       setState(() {
@@ -850,11 +952,10 @@ class _ContestPageState extends State<ContestPage> {
                             Positioned(
                                 right: -12,
                                 bottom: -22,
-                                child: Icon(icons[seed],
+                                child: Icon(icon,
                                     color: ink.withValues(alpha: .075),
                                     size: 140)),
-                            Center(
-                                child: Icon(icons[seed], size: 50, color: ink)),
+                            Center(child: Icon(icon, size: 50, color: ink)),
                             if (own)
                               _tag('YOUR COSTUME', Colors.white)
                             else if (selected)
@@ -879,6 +980,16 @@ class _ContestPageState extends State<ContestPage> {
                                         height: 1.2,
                                         fontWeight: FontWeight.w700,
                                         letterSpacing: -.4)),
+                                if (costume.titleHidden &&
+                                    _contest!.revealAt != null) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                      'Reveals ${_revealLabel(_contest!.revealAt!)}',
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: muted,
+                                          height: 1.5)),
+                                ],
                                 const SizedBox(height: 19),
                                 Row(children: [
                                   Icon(
@@ -1021,7 +1132,7 @@ class HostPage extends StatefulWidget {
   State<HostPage> createState() => _HostPageState();
 }
 
-class _HostPageState extends State<HostPage> {
+class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _title = TextEditingController();
@@ -1030,19 +1141,37 @@ class _HostPageState extends State<HostPage> {
   String? _error;
   String? _notice;
   int _hostEpoch = 0;
+  int _refreshEpoch = 0;
+  Timer? _refreshTimer;
+  Timer? _revealTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.service.isAdminAuthenticated) _refresh();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_busy && widget.service.isAdminAuthenticated) _refresh();
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    _revealTimer?.cancel();
     _email.dispose();
     _password.dispose();
     _title.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        widget.service.isAdminAuthenticated) {
+      _refresh();
+    }
   }
 
   Future<void> _action(Future<void> Function() action) async {
@@ -1067,13 +1196,19 @@ class _HostPageState extends State<HostPage> {
 
   Future<void> _refresh() async {
     final epoch = _hostEpoch;
+    final refreshEpoch = ++_refreshEpoch;
     try {
       final snapshot = await widget.service.fetchAdmin();
-      if (mounted && epoch == _hostEpoch) {
+      if (mounted && epoch == _hostEpoch && refreshEpoch == _refreshEpoch) {
         setState(() {
+          if (_snapshot == null || _title.text == _snapshot!.title) {
+            _title.text = snapshot.title;
+          }
           _snapshot = snapshot;
-          _title.text = snapshot.title;
         });
+        _revealTimer?.cancel();
+        final delay = _revealDelay(snapshot.revealAt, snapshot.serverTime);
+        if (delay != null) _revealTimer = Timer(delay, _refresh);
       }
     } catch (e) {
       if (mounted) {
@@ -1121,6 +1256,32 @@ class _HostPageState extends State<HostPage> {
     });
   }
 
+  Future<void> _deleteEntry(CostumeResult costume) async {
+    final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+                title: Text('Delete ${costume.username}’s entry?'),
+                scrollable: true,
+                content: Text('Remove “${costume.title}” from the contest? '
+                    'This cannot be undone. They can register again while registration is open.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Keep entry')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Delete entry')),
+                ]));
+    if (confirmed != true || !mounted) return;
+    await _action(() async {
+      await widget.service.deleteEntry(costume.id);
+      await _refresh();
+      if (mounted) {
+        setState(() => _notice = '${costume.username}’s entry deleted.');
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
@@ -1134,6 +1295,7 @@ class _HostPageState extends State<HostPage> {
                         ? null
                         : () async {
                             _hostEpoch++;
+                            _revealTimer?.cancel();
                             setState(() {
                               _snapshot = null;
                             });
@@ -1215,6 +1377,9 @@ class _HostPageState extends State<HostPage> {
 
   List<Widget> _dashboard() {
     final data = _snapshot!;
+    final canDelete =
+        data.stage == ContestStage.registration && data.ballotCount == 0;
+    final waitingForReveal = data.hasHiddenCostumes;
     final maxVotes =
         data.results.fold<int>(1, (max, c) => c.votes > max ? c.votes : max);
     final results = [...data.results]
@@ -1265,6 +1430,17 @@ class _HostPageState extends State<HostPage> {
                         }),
                 child: const Text('Save contest name'))),
         const Divider(height: 32, color: line),
+        if (data.revealAt != null) ...[
+          Text('Costume reveal · ${_revealLabel(data.revealAt!)}',
+              style: const TextStyle(fontWeight: FontWeight.w600, height: 1.5)),
+          const SizedBox(height: 8),
+          Text(
+              data.revealPending
+                  ? 'Guests can keep their costume name secret until then. You can see every costume here.'
+                  : 'The reveal time has passed. All costume names are now visible to guests.',
+              style: const TextStyle(color: muted, height: 1.6)),
+          const SizedBox(height: 16),
+        ],
         Text(
             data.stage == ContestStage.registration
                 ? 'Give everyone time to enter. At least four costumes are needed so each person has three others to choose from.'
@@ -1273,9 +1449,14 @@ class _HostPageState extends State<HostPage> {
                     : 'The ballot is closed. You can announce the results whenever you’re ready.',
             style: const TextStyle(color: muted, height: 1.6)),
         const SizedBox(height: 16),
+        if (waitingForReveal) ...[
+          const Text('Voting can open after the secret costumes are revealed.',
+              style: TextStyle(color: muted, height: 1.5)),
+          const SizedBox(height: 12),
+        ],
         if (data.stage == ContestStage.registration)
           FilledButton(
-              onPressed: _busy || data.registeredCount < 4
+              onPressed: _busy || data.registeredCount < 4 || waitingForReveal
                   ? null
                   : () => _changeStage(ContestStage.voting),
               child: const Text('Close registration & open voting')),
@@ -1290,7 +1471,9 @@ class _HostPageState extends State<HostPage> {
               child: const Text('Reopen registration')),
         if (data.stage == ContestStage.closed)
           OutlinedButton(
-              onPressed: _busy ? null : () => _changeStage(ContestStage.voting),
+              onPressed: _busy || waitingForReveal
+                  ? null
+                  : () => _changeStage(ContestStage.voting),
               child: const Text('Resume voting')),
       ])),
       const SizedBox(height: 24),
@@ -1298,13 +1481,22 @@ class _HostPageState extends State<HostPage> {
         const Row(children: [
           Icon(Icons.emoji_events_outlined, size: 25),
           SizedBox(width: 10),
-          Text('The results',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700))
+          Expanded(
+              child: Text('The results',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)))
         ]),
         const SizedBox(height: 12),
         const Text(
             'Equal vote totals are a tie. Each submitted ballot contributes three votes.',
             style: TextStyle(color: muted, height: 1.6)),
+        const SizedBox(height: 8),
+        Text(
+            canDelete
+                ? 'You can delete an entry below while registration is open.'
+                : data.ballotCount > 0
+                    ? 'Entry deletion is locked because voting has started.'
+                    : 'Reopen registration to delete an entry before anyone votes.',
+            style: const TextStyle(color: muted, height: 1.6)),
         const SizedBox(height: 24),
         if (results.isEmpty)
           const Text('Results will appear here once costumes are entered.'),
@@ -1321,6 +1513,12 @@ class _HostPageState extends State<HostPage> {
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.w800))
               ]),
+              if (c.titleHidden && data.revealAt != null) ...[
+                const SizedBox(height: 8),
+                Text('Secret until ${_revealLabel(data.revealAt!)}',
+                    style: const TextStyle(
+                        color: muted, fontSize: 12, height: 1.5)),
+              ],
               const SizedBox(height: 10),
               ClipRRect(
                   borderRadius: BorderRadius.circular(6),
@@ -1329,6 +1527,14 @@ class _HostPageState extends State<HostPage> {
                       minHeight: 9,
                       backgroundColor: paper,
                       color: ink)),
+              if (canDelete)
+                Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                        key: ValueKey('delete-${c.id}'),
+                        onPressed: _busy ? null : () => _deleteEntry(c),
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: Text('Delete ${c.username}’s entry'))),
             ]))),
       ])),
       const SizedBox(height: 40),

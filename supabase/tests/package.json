@@ -1,0 +1,12 @@
+{
+  "name": "costume-contest-database-tests",
+  "private": true,
+  "type": "module",
+  "description": "Development-only PostgreSQL contract tests; never bundled into the website.",
+  "scripts": {
+    "test": "node run_contract.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "latest"
+  }
+}

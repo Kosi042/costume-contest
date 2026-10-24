@@ -1,0 +1,12 @@
+.dart_tool/
+.flutter-plugins*
+.packages
+build/
+coverage/
+.env*
+!.env.example
+*.log
+.DS_Store
+.vscode/
+config.local.json
+node_modules/

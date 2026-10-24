@@ -97,13 +97,14 @@ void main() {
 
   testWidgets('registration requires confirming the name and costume',
       (tester) async {
-    final service = DemoContestService();
+    final service = DemoContestService(now: () => DateTime.utc(2026, 10, 24));
     await service.loginAdmin('', '');
     await service.setStage(ContestStage.registration);
     await service.logoutAdmin();
     await open(tester, service: service);
     await enterName(tester, 'Taylor');
     expect(find.text('Meet your alter ego.'), findsOneWidget);
+    await tapText(tester, 'Keep my costume secret');
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Your costume'), 'Paper Dragon');
     await tapText(tester, 'Enter my costume');
@@ -145,7 +146,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('a guest can keep a costume secret without hiding their name',
+  testWidgets('a new costume is secret by default without hiding the guest name',
       (tester) async {
     final service = DemoContestService(now: () => DateTime.utc(2026, 10, 24));
     await service.loginAdmin('', '');
@@ -155,7 +156,6 @@ void main() {
     await enterName(tester, 'Taylor');
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Your costume'), 'Paper Dragon');
-    await tapText(tester, 'Keep my costume secret');
     await tapText(tester, 'Enter my costume');
     expect(find.textContaining('31 October 2026 at 20:00 CET'), findsWidgets);
     await tapText(tester, 'Yes, that’s me');

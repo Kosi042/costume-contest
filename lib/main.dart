@@ -118,7 +118,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
   String? _error;
   bool _busy = false;
   bool _loading = true;
-  bool _hideUntilReveal = false;
+  bool _hideUntilReveal = true;
   Timer? _refreshTimer;
   Timer? _revealTimer;
   int _sessionEpoch = 0;
@@ -323,7 +323,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
         _participant = participant;
         _username = participant.username!;
         _costumeController.clear();
-        _hideUntilReveal = false;
+        _hideUntilReveal = true;
       });
       await _load();
     });
@@ -337,7 +337,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
         _entryNameController.clear();
         _nameController.clear();
         _costumeController.clear();
-        _hideUntilReveal = false;
+        _hideUntilReveal = true;
         _error = null;
       });
 

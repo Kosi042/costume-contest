@@ -2,6 +2,10 @@
 
 A mobile-friendly costume contest built with Dart and Flutter. GitHub Pages hosts the website; Supabase stores entries and votes and protects the organizer's results.
 
+**Live website:** [kosi042.github.io/costume-contest](https://kosi042.github.io/costume-contest/).
+
+This repository deploys automatically to GitHub Pages from `main`. Its Supabase project is configured through repository variables. The live contest starts with registration open and no sample entries. Use **Host sign in** on the website with your contest organizer email and password to manage the event.
+
 Contestants enter their name and costume, then choose their name and confirm **“Yes, that’s me”** before voting. The backend allows one final ballot per normalized name, with **exactly three different costumes**, excluding that entrant's own costume. At least four contestants are needed before voting can open.
 
 Names are compared after normalizing capitalization and extra spaces, so changing those cannot create a duplicate entry. People with the same real name should include a surname or recognizable nickname.
@@ -63,7 +67,7 @@ The included workflow automatically handles either address.
 
 The workflow installs Flutter 3.44.1, analyzes the code, runs tests, builds the live app, and publishes `build/web`. It runs only for default-branch pushes and manual runs on the default branch; pull requests do not deploy. It automatically uses `/REPOSITORY/` for project sites and `/` for a repository named `OWNER.github.io`. These instructions assume the standard `github.io` address.
 
-Deployment intentionally stops if either configuration variable is missing or if the key appears to be a secret/service-role key. No live credentials or account connections are supplied with this project, so the setup steps above are required before publishing.
+Deployment intentionally stops if either configuration variable is missing or if the key appears to be a secret/service-role key. The setup steps above apply when deploying a separate copy of this project; the live repository is already configured. Private credentials are never included in the source.
 
 ## Run the contest
 

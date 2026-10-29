@@ -1,4 +1,5 @@
 import 'package:costume_ballot/contest_service.dart';
+import 'package:costume_ballot/app_language.dart';
 import 'package:costume_ballot/main.dart';
 import 'package:costume_ballot/models.dart';
 import 'package:flutter/material.dart';
@@ -6,13 +7,18 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   Future<void> open(WidgetTester tester,
-      {double width = 390, DemoContestService? service}) async {
+      {double width = 390,
+      DemoContestService? service,
+      AppLanguage? initialLanguage = AppLanguage.english}) async {
     tester.view.physicalSize = Size(width, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester
-        .pumpWidget(CostumeClubApp(service: service ?? DemoContestService()));
+    final contestService = service ?? DemoContestService();
+    await tester.pumpWidget(initialLanguage == null
+        ? CostumeClubApp(service: contestService)
+        : CostumeClubApp(
+            service: contestService, initialLanguage: initialLanguage));
     await tester.pumpAndSettle();
   }
 
@@ -34,6 +40,174 @@ void main() {
     await tester.enterText(field, name);
     await tapText(tester, 'Join the party');
   }
+
+  Future<void> switchLanguage(WidgetTester tester, String language) async {
+    final chooser = find.byKey(const Key('language-switch'));
+    await tester.ensureVisible(chooser);
+    await tester.tap(chooser);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(language).last);
+    await tester.pumpAndSettle();
+  }
+
+  Locale appLocale(WidgetTester tester) =>
+      Localizations.localeOf(tester.element(find.byType(Scaffold).first));
+
+  testWidgets('German is the default including native labels on a small phone',
+      (tester) async {
+    await open(tester, width: 320, initialLanguage: null);
+    expect(appLocale(tester).languageCode, 'de');
+    final context = tester.element(find.byType(Scaffold).first);
+    expect(MaterialLocalizations.of(context).closeButtonTooltip, 'Schließen');
+    expect(find.text('Orga'), findsOneWidget);
+    expect(find.text('Dein Name'), findsOneWidget);
+    expect(find.text('Mitmachen'), findsOneWidget);
+    expect(find.text('Your name'), findsNothing);
+    expect(find.text('Join the party'), findsNothing);
+    expect(find.text('A little disguise.\nA lot of glory.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await switchLanguage(tester, 'English');
+    expect(appLocale(tester).languageCode, 'en');
+    expect(find.text('Your name'), findsOneWidget);
+    expect(find.text('Join the party'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'language changes retain name and costume drafts and privacy choice',
+      (tester) async {
+    final service = DemoContestService(now: () => DateTime.utc(2026, 10, 29));
+    await service.loginAdmin('', '');
+    await service.setStage(ContestStage.registration);
+    await service.logoutAdmin();
+    await open(tester, width: 320, service: service);
+    final nameField = find.widgetWithText(TextField, 'Your name');
+    await tester.ensureVisible(nameField);
+    await tester.enterText(nameField, 'Taylor Moon');
+    await switchLanguage(tester, 'Deutsch');
+    expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('Taylor Moon'), findsOneWidget);
+    expect(find.text('Your name'), findsNothing);
+    await switchLanguage(tester, 'English');
+    expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Your name'))
+            .controller!
+            .text,
+        'Taylor Moon');
+    await tapText(tester, 'Join the party');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Your costume'), 'Paper Dragon');
+    await tapText(tester, 'Keep my costume secret');
+    expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        isFalse);
+    await switchLanguage(tester, 'Deutsch');
+    expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('Paper Dragon'), findsOneWidget);
+    expect(find.text('Your costume'), findsNothing);
+    expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+        isFalse);
+    expect(tester.takeException(), isNull);
+    await switchLanguage(tester, 'English');
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Your costume'))
+            .controller!
+            .text,
+        'Paper Dragon');
+    await tapText(tester, 'Enter my costume');
+    await tapText(tester, 'Yes, that’s me');
+    final registered = (await service.fetchContest())
+        .costumes
+        .singleWhere((costume) => costume.username == 'Taylor Moon');
+    expect(registered.title, 'Paper Dragon');
+    expect(registered.titleHidden, isFalse);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('language changes keep the voter session and selected costumes',
+      (tester) async {
+    final service = DemoContestService();
+    await open(tester, width: 320, service: service);
+    await tapText(tester, 'Try the demo as Alex →');
+    await tapText(tester, 'Yes, that’s me');
+    await tapText(tester, 'Cosmic Cowgirl');
+    await tapText(tester, 'Garden Goblin');
+    expect(find.text('2 of 3 selected'), findsOneWidget);
+    await switchLanguage(tester, 'Deutsch');
+    expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('2 von 3 ausgewählt'), findsOneWidget);
+    expect(find.text('2 of 3 selected'), findsNothing);
+    expect(find.text('Cosmic Cowgirl'), findsOneWidget);
+    expect(find.text('Garden Goblin'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await switchLanguage(tester, 'English');
+    expect(find.text('Voting as Alex'), findsOneWidget);
+    expect(find.text('2 of 3 selected'), findsOneWidget);
+    expect((await service.loginParticipant('Alex')).hasVoted, isFalse);
+    await tapText(tester, 'Midnight Moth');
+    await tapText(tester, 'Review votes →');
+    await tapText(tester, 'Submit my 3 votes');
+    expect(find.text('You’re all voted.'), findsOneWidget);
+    expect((await service.loginParticipant('Alex')).hasVoted, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+      'German host controls fit a small phone and switching preserves edits',
+      (tester) async {
+    final service = DemoContestService(now: () => DateTime.utc(2026, 10, 29));
+    await service.loginAdmin('', '');
+    await service.setStage(ContestStage.registration);
+    await service.registerParticipant('Taylor', 'Paper Dragon',
+        hideUntilReveal: true);
+    await service.logoutAdmin();
+    await open(tester, width: 320, service: service, initialLanguage: null);
+    await tapText(tester, 'Orga');
+    expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('Demo-Orga öffnen'), findsOneWidget);
+    await tapText(tester, 'Demo-Orga öffnen');
+    expect(service.isAdminAuthenticated, isTrue);
+    expect(find.text('Die Ergebnisse'), findsOneWidget);
+    expect(find.text('Paper Dragon · Taylor'), findsOneWidget);
+    final germanTitleField =
+        find.widgetWithText(TextField, 'Name des Wettbewerbs');
+    await tester.ensureVisible(germanTitleField);
+    await tester.enterText(germanTitleField, 'Halloween Finale');
+    await switchLanguage(tester, 'English');
+    expect(appLocale(tester).languageCode, 'en');
+    expect(find.text('The results'), findsOneWidget);
+    expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, 'Contest name'))
+            .controller!
+            .text,
+        'Halloween Finale');
+    expect(service.isAdminAuthenticated, isTrue);
+    await switchLanguage(tester, 'Deutsch');
+    expect(appLocale(tester).languageCode, 'de');
+    expect(
+        tester
+            .widget<TextField>(
+                find.widgetWithText(TextField, 'Name des Wettbewerbs'))
+            .controller!
+            .text,
+        'Halloween Finale');
+    await tapText(tester, 'Namen speichern');
+    expect((await service.fetchContest()).title, 'Halloween Finale');
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('Mitmachen'), findsOneWidget);
+    expect(find.textContaining('Halloween Finale'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('confirming identity is required before voting', (tester) async {
     await open(tester);
@@ -146,7 +320,8 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('a new costume is secret by default without hiding the guest name',
+  testWidgets(
+      'a new costume is secret by default without hiding the guest name',
       (tester) async {
     final service = DemoContestService(now: () => DateTime.utc(2026, 10, 24));
     await service.loginAdmin('', '');

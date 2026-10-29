@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'app_language.dart';
 
 import 'contest_service.dart';
 import 'models.dart';
@@ -10,27 +13,6 @@ const paper = Color(0xFFF7F5EF);
 const lime = Color(0xFFD6EF82);
 const muted = Color(0xFF60706A);
 const line = Color(0xFFDFE3D8);
-
-String _revealLabel(DateTime date) {
-  final cet = date.toUtc().add(const Duration(hours: 1));
-  const months = [
-    'January',
-    'February',
-    'March',
-    'April',
-    'May',
-    'June',
-    'July',
-    'August',
-    'September',
-    'October',
-    'November',
-    'December'
-  ];
-  final hour = cet.hour.toString().padLeft(2, '0');
-  final minute = cet.minute.toString().padLeft(2, '0');
-  return '${cet.day} ${months[cet.month - 1]} ${cet.year} at $hour:$minute CET';
-}
 
 Duration? _revealDelay(DateTime? revealAt, DateTime? serverTime) {
   if (revealAt == null ||
@@ -44,12 +26,33 @@ Duration? _revealDelay(DateTime? revealAt, DateTime? serverTime) {
 
 void main() => runApp(const CostumeClubApp());
 
-class CostumeClubApp extends StatelessWidget {
-  const CostumeClubApp({this.service, super.key});
+class CostumeClubApp extends StatefulWidget {
+  const CostumeClubApp(
+      {this.service, this.initialLanguage = AppLanguage.german, super.key});
   final ContestService? service;
+  final AppLanguage initialLanguage;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  State<CostumeClubApp> createState() => _CostumeClubAppState();
+}
+
+class _CostumeClubAppState extends State<CostumeClubApp> {
+  late AppLanguage _language;
+
+  @override
+  void initState() {
+    super.initState();
+    _language = widget.initialLanguage;
+  }
+
+  @override
+  Widget build(BuildContext context) => AppLanguageScope(
+      language: _language,
+      onChanged: (language) => setState(() => _language = language),
+      child: MaterialApp(
+        locale: Locale(_language == AppLanguage.german ? 'de' : 'en'),
+        supportedLocales: const [Locale('de'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         title: 'Costume Club',
         debugShowCheckedModeBanner: false,
         initialRoute: '/',
@@ -93,8 +96,8 @@ class CostumeClubApp extends StatelessWidget {
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           )),
         ),
-        home: ContestPage(service: service),
-      );
+        home: ContestPage(service: widget.service),
+      ));
 }
 
 class ContestPage extends StatefulWidget {
@@ -105,6 +108,7 @@ class ContestPage extends StatefulWidget {
 }
 
 class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
+  AppCopy get _copy => AppLanguageScope.of(context).copy;
   ContestService? _service;
   ContestState? _contest;
   ParticipantSession? _participant;
@@ -131,6 +135,8 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
       _contest?.stage == ContestStage.voting &&
       !(_contest?.costumes.any((c) => c.titleHidden) ?? false);
   bool get _revealPending => _contest?.revealPending ?? false;
+  String _displayTitle(Costume costume) =>
+      costume.titleHidden ? _copy.text('Secret costume') : costume.title;
 
   @override
   void initState() {
@@ -233,7 +239,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
     return await showDialog<bool>(
             context: context,
             builder: (context) => AlertDialog(
-                  title: const Text('Is this you?'),
+                  title: Text(_copy.text('Is this you?')),
                   scrollable: true,
                   content: SizedBox(
                       width: 340,
@@ -251,26 +257,34 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                             if (secret && _contest?.revealAt != null) ...[
                               const SizedBox(height: 12),
                               Text(
-                                  'Hidden from guests until ${_revealLabel(_contest!.revealAt!)}. Your name stays visible; the host can see your costume.',
+                                  _copy.text(
+                                      'Hidden from guests until {date}. Your name stays visible; the host can see your costume.',
+                                      {
+                                        'date': _copy
+                                            .revealLabel(_contest!.revealAt!)
+                                      }),
                                   style: const TextStyle(
                                       color: muted, height: 1.5)),
                             ],
                             const SizedBox(height: 20),
                             Text(
                                 hasVoted
-                                    ? 'A ballot has already been submitted for this name. You can see its confirmation, but cannot vote again.'
+                                    ? _copy.text(
+                                        'A ballot has already been submitted for this name. You can see its confirmation, but cannot vote again.')
                                     : registering
-                                        ? 'Confirm this is your name and costume. Use a surname or nickname if someone else shares your name.'
-                                        : 'Please confirm this is your own name and costume. Each name gets one ballot with three votes.',
+                                        ? _copy.text(
+                                            'Confirm this is your name and costume. Use a surname or nickname if someone else shares your name.')
+                                        : _copy.text(
+                                            'Please confirm this is your own name and costume. Each name gets one ballot with three votes.'),
                                 style: const TextStyle(height: 1.6)),
                           ])),
                   actions: [
                     TextButton(
                         onPressed: () => Navigator.pop(context, false),
-                        child: const Text('That’s not me')),
+                        child: Text(_copy.text('That’s not me'))),
                     FilledButton(
                         onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Yes, that’s me')),
+                        child: Text(_copy.text('Yes, that’s me'))),
                   ],
                 )) ??
         false;
@@ -293,7 +307,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                 'Refresh the lineup and try your name again.');
           }
           final confirmed = await _confirmIdentity(
-              participant.username!, entries.first.title,
+              participant.username!, _displayTitle(entries.first),
               hasVoted: participant.hasVoted,
               secret: entries.first.titleHidden);
           if (!confirmed || !mounted || epoch != _sessionEpoch) return;
@@ -347,15 +361,16 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
     final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-              title: const Text('Your final three'),
+              title: Text(_copy.text('Your final three')),
               content: SizedBox(
                   width: 360,
                   child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                            'Voting as ${_participant!.username}. One vote for each of these costumes:'),
+                        Text(_copy.text(
+                            'Voting as {name}. One vote for each of these costumes:',
+                            {'name': _participant!.username!})),
                         const SizedBox(height: 16),
                         ...choices.map((c) => Padding(
                             padding: const EdgeInsets.only(bottom: 12),
@@ -363,21 +378,23 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                               const Icon(Icons.check_circle_outline, size: 21),
                               const SizedBox(width: 10),
                               Expanded(
-                                  child: Text('${c.title}\n${c.username}',
+                                  child: Text(
+                                      '${_displayTitle(c)}\n${c.username}',
                                       style: const TextStyle(height: 1.5)))
                             ]))),
                         const SizedBox(height: 8),
-                        const Text(
-                            'Once submitted, your ballot cannot be changed.',
+                        Text(
+                            _copy.text(
+                                'Once submitted, your ballot cannot be changed.'),
                             style: TextStyle(color: muted, height: 1.5)),
                       ])),
               actions: [
                 TextButton(
                     onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Keep choosing')),
+                    child: Text(_copy.text('Keep choosing'))),
                 FilledButton(
                     onPressed: () => Navigator.pop(context, true),
-                    child: const Text('Submit my 3 votes'))
+                    child: Text(_copy.text('Submit my 3 votes')))
               ],
             ));
     if (confirmed != true || !mounted) return;
@@ -418,8 +435,9 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
               width: double.infinity,
               color: lime,
               padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 16),
-              child: const Text(
-                  'PREVIEW  ·  Sample entries. No real votes are saved.',
+              child: Text(
+                  _copy.text(
+                      'PREVIEW  ·  Sample entries. No real votes are saved.'),
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
         Expanded(
@@ -432,9 +450,10 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _header(narrow),
-              if (_error != null) _errorNotice(_error!, onRetry: () => _load()),
+              if (_error != null)
+                _errorNotice(context, _error!, onRetry: () => _load()),
               if (_loading)
-                const Padding(
+                Padding(
                     padding: EdgeInsets.all(90),
                     child: Center(child: CircularProgressIndicator())),
               if (!_loading && _service == null) _setupView(),
@@ -450,7 +469,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                 Padding(
                     padding: const EdgeInsets.symmetric(vertical: 25),
                     child: Text(
-                        'A good costume deserves a little applause.\n${_contest!.title} · Made for a memorable night.',
+                        _copy.flavour('footer', {'contest': _contest!.title}),
                         style: const TextStyle(
                             color: muted, fontSize: 12, height: 1.8))),
               ],
@@ -461,30 +480,36 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _header(bool narrow) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Row(children: [
-        Container(
-            width: 39,
-            height: 39,
-            decoration: BoxDecoration(
-                color: ink, borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.auto_awesome, color: lime, size: 23)),
-        const SizedBox(width: 10),
-        const Text('COSTUME\nCLUB',
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 2.2,
-                height: 1.3)),
-        const Spacer(),
-        if (_registered && !narrow)
-          TextButton(onPressed: _signOut, child: const Text('Sign out')),
-        TextButton.icon(
-            onPressed: _service == null ? null : _openHost,
-            icon: const Icon(Icons.lock_outline, size: 16),
-            label: Text(narrow ? 'Host' : 'Host sign in')),
-      ]));
+  Widget _header(bool narrow) => LayoutBuilder(
+      builder: (context, constraints) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Row(children: [
+            Container(
+                width: 39,
+                height: 39,
+                decoration: BoxDecoration(
+                    color: ink, borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.auto_awesome, color: lime, size: 23)),
+            if (constraints.maxWidth >= 340) ...[
+              const SizedBox(width: 10),
+              Text('COSTUME\nCLUB',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 2.2,
+                      height: 1.3)),
+            ],
+            const Spacer(),
+            const LanguageSwitcher(),
+            if (_registered && !narrow)
+              TextButton(
+                  onPressed: _signOut, child: Text(_copy.text('Sign out'))),
+            TextButton.icon(
+                onPressed: _service == null ? null : _openHost,
+                icon: const Icon(Icons.lock_outline, size: 16),
+                label: Text(
+                    narrow ? _copy.text('Host') : _copy.text('Host sign in'))),
+          ])));
 
   Widget _hero(bool narrow) {
     final copy =
@@ -493,8 +518,10 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
       const SizedBox(height: 24),
       Text(
           _registered
-              ? (_voted ? 'Good taste.\nGreat choices.' : 'Who wore\nit best?')
-              : 'A little disguise.\nA lot of glory.',
+              ? (_voted
+                  ? _copy.flavour('heroVoted')
+                  : _copy.flavour('heroReady'))
+              : _copy.flavour('heroNew'),
           style: TextStyle(
               fontSize: narrow ? 46 : 65,
               fontWeight: FontWeight.w800,
@@ -506,16 +533,23 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
           child: Text(
               _registered
                   ? (_voted
-                      ? 'Your three votes are in. Now get back to the party — the host will reveal the winners.'
-                      : 'Welcome, ${_participant!.username}. Find your favourites and give three brilliant costumes their moment.')
-                  : 'Bring your alter ego. Meet the contenders.\nGive your three favourites a moment in the spotlight.',
+                      ? _copy.text(
+                          'Your three votes are in. Now get back to the party — the host will reveal the winners.')
+                      : _copy.text(
+                          'Welcome, {name}. Find your favourites and give three brilliant costumes their moment.',
+                          {
+                              'name': _participant!.username!
+                            }))
+                  : _copy.flavour('heroIntroduction'),
               style:
                   const TextStyle(fontSize: 16, height: 1.65, color: muted))),
       const SizedBox(height: 24),
       Wrap(spacing: 18, runSpacing: 10, children: [
         _miniFact(
-            Icons.people_outline, '${_contest!.costumes.length} costumes'),
-        _miniFact(Icons.favorite_border, '3 votes per person'),
+            Icons.people_outline,
+            _copy.text(
+                '{count} costumes', {'count': _contest!.costumes.length})),
+        _miniFact(Icons.favorite_border, _copy.text('3 votes per person')),
       ]),
     ]);
     final card = _participant == null
@@ -554,10 +588,10 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
             const SizedBox(width: 8),
             Text(
                 _contest!.stage == ContestStage.registration
-                    ? 'REGISTRATION IS OPEN'
+                    ? _copy.text('REGISTRATION IS OPEN')
                     : _voting
-                        ? 'THE BALLOT IS OPEN'
-                        : 'VOTING HAS CLOSED',
+                        ? _copy.text('THE BALLOT IS OPEN')
+                        : _copy.text('VOTING HAS CLOSED'),
                 style: const TextStyle(
                     fontSize: 10,
                     letterSpacing: 1.3,
@@ -580,7 +614,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
         Row(children: [
           const Icon(Icons.person_outline, color: lime, size: 30),
           const Spacer(),
-          Text('YOUR MOMENT',
+          Text(_copy.flavour('joinEyebrow'),
               style: TextStyle(
                   color: lime.withValues(alpha: .8),
                   fontSize: 10,
@@ -588,15 +622,16 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                   letterSpacing: 2))
         ]),
         const SizedBox(height: 26),
-        const Text('Let’s get you in.',
+        Text(_copy.flavour('joinHeading'),
             style: TextStyle(
                 color: Colors.white,
                 fontSize: 27,
                 fontWeight: FontWeight.w700,
                 letterSpacing: -.6)),
         const SizedBox(height: 10),
-        const Text(
-            'Enter your name to join or return.\nOne name. Three different favourites.',
+        Text(
+            _copy.text(
+                'Enter your name to join or return.\nOne name. Three different favourites.'),
             style:
                 TextStyle(color: Color(0xFFB8C8BE), fontSize: 14, height: 1.6)),
         const SizedBox(height: 23),
@@ -607,9 +642,9 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
             autocorrect: false,
             enableSuggestions: false,
             onSubmitted: (_) => _enterName(),
-            decoration: const InputDecoration(
-                labelText: 'Your name',
-                hintText: 'e.g. Alex Smith',
+            decoration: InputDecoration(
+                labelText: _copy.text('Your name'),
+                hintText: _copy.text('e.g. Alex Smith'),
                 prefixIcon: Icon(Icons.person_outline, size: 19))),
         const SizedBox(height: 12),
         SizedBox(
@@ -622,9 +657,9 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                     ? _spinner()
                     : const Icon(Icons.arrow_forward, size: 19),
                 iconAlignment: IconAlignment.end,
-                label: const Text('Join the party'))),
+                label: Text(_copy.text('Join the party')))),
         const SizedBox(height: 18),
-        const Text('Already entered? Use the same name to return.',
+        Text(_copy.text('Already entered? Use the same name to return.'),
             style:
                 TextStyle(color: Color(0xFFB8C8BE), fontSize: 11, height: 1.5)),
         if (_isDemo) ...[
@@ -635,7 +670,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                 _enterName();
               },
               style: TextButton.styleFrom(foregroundColor: lime),
-              child: const Text('Try the demo as Alex →')),
+              child: Text(_copy.text('Try the demo as Alex →'))),
         ],
       ]));
 
@@ -643,41 +678,44 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Icon(Icons.theater_comedy_outlined, size: 32),
         const SizedBox(height: 15),
-        const Text('Meet your alter ego.',
+        Text(_copy.flavour('registrationHeading'),
             style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700)),
         const SizedBox(height: 10),
         if (_contest!.stage != ContestStage.registration) ...[
-          const Text(
-              'Registration is closed. Ask your host if you need help joining.',
+          Text(
+              _copy.text(
+                  'Registration is closed. Ask your host if you need help joining.'),
               style: TextStyle(color: muted, height: 1.6)),
         ] else
           Form(
               key: _entryForm,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(children: [
-                const Text(
-                    'Your name will appear in the lineup. If someone shares your name, add your surname or a nickname.',
+                Text(
+                    _copy.text(
+                        'Your name will appear in the lineup. If someone shares your name, add your surname or a nickname.'),
                     style: TextStyle(color: muted, height: 1.6)),
                 const SizedBox(height: 20),
                 TextFormField(
                     controller: _nameController,
                     maxLength: 32,
                     enabled: !_busy,
-                    decoration: const InputDecoration(
-                        labelText: 'Your name / nickname',
-                        hintText: 'e.g. Alex'),
+                    decoration: InputDecoration(
+                        labelText: _copy.text('Your name / nickname'),
+                        hintText: _copy.text('e.g. Alex')),
                     validator: (value) => (value?.trim().length ?? 0) < 2
-                        ? 'Use at least 2 characters.'
+                        ? _copy.text('Use at least 2 characters.')
                         : null),
                 const SizedBox(height: 12),
                 TextFormField(
                     controller: _costumeController,
                     maxLength: 80,
                     enabled: !_busy,
-                    decoration: const InputDecoration(
-                        labelText: 'Your costume',
-                        hintText: 'e.g. The midnight magician'),
+                    decoration: InputDecoration(
+                        labelText: _copy.text('Your costume'),
+                        hintText: _copy.text('e.g. The midnight magician')),
                     validator: (value) => (value?.trim().length ?? 0) < 2
-                        ? 'Tell us your costume.'
+                        ? _copy.text('Tell us your costume.')
                         : null),
                 const SizedBox(height: 12),
                 if (_revealPending) ...[
@@ -691,9 +729,10 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                           ? null
                           : (value) =>
                               setState(() => _hideUntilReveal = value ?? false),
-                      title: const Text('Keep my costume secret'),
-                      subtitle: Text(
-                          'Reveal on ${_revealLabel(_contest!.revealAt!)}. Your name stays visible; the host can see your costume.'),
+                      title: Text(_copy.text('Keep my costume secret')),
+                      subtitle: Text(_copy.text(
+                          'Reveal on {date}. Your name stays visible; the host can see your costume.',
+                          {'date': _copy.revealLabel(_contest!.revealAt!)})),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -704,12 +743,12 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                         onPressed: _busy ? null : _register,
                         child: _busy
                             ? _spinner()
-                            : const Text('Enter my costume'))),
+                            : Text(_copy.text('Enter my costume')))),
               ])),
         const SizedBox(height: 8),
         TextButton(
             onPressed: _busy ? null : _signOut,
-            child: const Text('Use a different name')),
+            child: Text(_copy.text('Use a different name'))),
       ]));
 
   Widget _welcomeCard() => _lightCard(
@@ -722,28 +761,38 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
             child: Icon(_voted ? Icons.check : Icons.theater_comedy_outlined,
                 size: 27)),
         const SizedBox(height: 20),
-        Text(_voted ? 'You’re all voted.' : 'You’re on the list.',
+        Text(
+            _voted
+                ? _copy.text('You’re all voted.')
+                : _copy.text('You’re on the list.'),
             style: const TextStyle(
                 fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -.7)),
         const SizedBox(height: 12),
         Text(
             _voted
-                ? 'A ballot has been received for this name. You cannot submit another. Only the host can view the totals.'
+                ? _copy.text(
+                    'A ballot has been received for this name. You cannot submit another. Only the host can view the totals.')
                 : _contest!.stage == ContestStage.registration
-                    ? 'Your costume is entered. Voting will appear here when the host opens the ballot.'
+                    ? _copy.text(
+                        'Your costume is entered. Voting will appear here when the host opens the ballot.')
                     : _contest!.stage == ContestStage.closed
-                        ? 'The ballot is closed. Stay tuned for the winner announcement from your host.'
-                        : 'Pick three different costumes below. Your own entry is marked and cannot be selected.',
+                        ? _copy.text(
+                            'The ballot is closed. Stay tuned for the winner announcement from your host.')
+                        : _copy.text(
+                            'Pick three different costumes below. Your own entry is marked and cannot be selected.'),
             style: const TextStyle(color: muted, height: 1.65)),
         const SizedBox(height: 18),
         const Divider(color: line),
         Row(children: [
           Expanded(
-              child: Text('Voting as ${_participant!.username}',
+              child: Text(
+                  _copy.text(
+                      'Voting as {name}', {'name': _participant!.username!}),
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.w600))),
           TextButton(
-              onPressed: _busy ? null : _signOut, child: const Text('Sign out'))
+              onPressed: _busy ? null : _signOut,
+              child: Text(_copy.text('Sign out')))
         ]),
       ]));
 
@@ -757,9 +806,12 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
 
   Widget _rules(bool narrow) {
     final rules = [
-      _rule('01', 'Make it a trio', 'Three votes. Three different costumes.'),
-      _rule('02', 'Share the spotlight', 'Save your votes for someone else.'),
-      _rule('03', 'Keep the suspense', 'Only your host can see the totals.'),
+      _rule('01', _copy.flavour('ruleThreeHeading'),
+          _copy.text('Three votes. Three different costumes.')),
+      _rule('02', _copy.flavour('ruleOthersHeading'),
+          _copy.text('Save your votes for someone else.')),
+      _rule('03', _copy.flavour('rulePrivateHeading'),
+          _copy.text('Only your host can see the totals.')),
     ];
     return Container(
         padding: const EdgeInsets.all(24),
@@ -799,23 +851,24 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
   Widget _lineup(bool narrow) {
     final query = _searchController.text.trim().toLowerCase();
     final costumes = _contest!.costumes
-        .where((c) => '${c.username} ${c.title}'.toLowerCase().contains(query))
+        .where((c) =>
+            '${c.username} ${_displayTitle(c)}'.toLowerCase().contains(query))
         .toList();
     final eligible =
         _contest!.costumes.where((c) => c.id != _participant?.costumeId).length;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Expanded(
+        Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('THE CONTENDERS',
+          Text(_copy.text('THE CONTENDERS'),
               style: TextStyle(
                   fontSize: 10,
                   letterSpacing: 2,
                   fontWeight: FontWeight.w800,
                   color: muted)),
           SizedBox(height: 10),
-          Text('Quite the cast.',
+          Text(_copy.flavour('lineupHeading'),
               style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.w800,
@@ -823,35 +876,38 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
         ])),
         IconButton(
             onPressed: _busy ? null : () => _load(),
-            tooltip: 'Refresh the lineup',
+            tooltip: _copy.text('Refresh the lineup'),
             icon: const Icon(Icons.refresh, size: 22)),
       ]),
       const SizedBox(height: 12),
       Text(
           _registered && _voting && !_voted
-              ? 'Tap a costume to add it to your ballot.'
-              : 'Big ideas. Excellent disguises. Meet tonight’s lineup.',
+              ? _copy.text('Tap a costume to add it to your ballot.')
+              : _copy.flavour('lineupIntroduction'),
           style: const TextStyle(color: muted, height: 1.5)),
       if (_contest!.costumes.any((c) => c.titleHidden) &&
           _contest!.revealAt != null)
         Padding(
             padding: const EdgeInsets.only(top: 14),
             child: Text(
-                'Secret costumes reveal automatically on ${_revealLabel(_contest!.revealAt!)}.',
+                _copy.text('Secret costumes reveal automatically on {date}.',
+                    {'date': _copy.revealLabel(_contest!.revealAt!)}),
                 style: const TextStyle(color: muted, height: 1.5))),
       if (_registered && _voting && !_voted && eligible < 3)
         Padding(
             padding: const EdgeInsets.only(top: 14),
             child: _errorNotice(
-                'There need to be at least three other costumes before you can vote. Please check with your host.')),
+                context,
+                _copy.text(
+                    'There need to be at least three other costumes before you can vote. Please check with your host.'))),
       const SizedBox(height: 22),
       TextField(
           controller: _searchController,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
               prefixIcon: Icon(Icons.search, size: 20),
-              hintText: 'Find a name or costume',
-              labelText: 'Search the lineup')),
+              hintText: _copy.text('Find a name or costume'),
+              labelText: _copy.text('Search the lineup'))),
       const SizedBox(height: 22),
       if (costumes.isEmpty)
         Container(
@@ -864,14 +920,17 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
             child: Column(children: [
               const Icon(Icons.theater_comedy_outlined, size: 36, color: muted),
               const SizedBox(height: 14),
-              Text(query.isEmpty ? 'The stage is yours.' : 'No costumes found.',
+              Text(
+                  query.isEmpty
+                      ? _copy.flavour('emptyLineupHeading')
+                      : _copy.text('No costumes found.'),
                   style: const TextStyle(
                       fontWeight: FontWeight.w700, fontSize: 18)),
               const SizedBox(height: 8),
               Text(
                   query.isEmpty
-                      ? 'Enter your costume to start the lineup.'
-                      : 'Try another name or costume.',
+                      ? _copy.text('Enter your costume to start the lineup.')
+                      : _copy.text('Try another name or costume.'),
                   style: const TextStyle(color: muted))
             ])),
       LayoutBuilder(builder: (context, constraints) {
@@ -931,7 +990,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
         button: canVote,
         selected: selected,
         label:
-            '${costume.title}, ${costume.username}${own ? ', your costume, cannot select' : ''}',
+            '${_displayTitle(costume)}, ${costume.username}${own ? _copy.text(', your costume, cannot select') : ''}',
         child: Material(
             color: selected ? const Color(0xFFF0F5DF) : Colors.white,
             shape: RoundedRectangleBorder(
@@ -957,9 +1016,9 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                                     size: 140)),
                             Center(child: Icon(icon, size: 50, color: ink)),
                             if (own)
-                              _tag('YOUR COSTUME', Colors.white)
+                              _tag(_copy.text('YOUR COSTUME'), Colors.white)
                             else if (selected)
-                              _tag('ON YOUR BALLOT', lime),
+                              _tag(_copy.text('ON YOUR BALLOT'), lime),
                           ])),
                       Padding(
                           padding: const EdgeInsets.all(19),
@@ -974,7 +1033,7 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                                         fontWeight: FontWeight.w700,
                                         color: muted)),
                                 const SizedBox(height: 8),
-                                Text(costume.title,
+                                Text(_displayTitle(costume),
                                     style: const TextStyle(
                                         fontSize: 20,
                                         height: 1.2,
@@ -984,7 +1043,10 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                                     _contest!.revealAt != null) ...[
                                   const SizedBox(height: 8),
                                   Text(
-                                      'Reveals ${_revealLabel(_contest!.revealAt!)}',
+                                      _copy.text('Reveals {date}', {
+                                        'date': _copy
+                                            .revealLabel(_contest!.revealAt!)
+                                      }),
                                       style: const TextStyle(
                                           fontSize: 12,
                                           color: muted,
@@ -1004,18 +1066,29 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                                   Expanded(
                                       child: Text(
                                           own
-                                              ? 'Cheer for someone else'
+                                              ? _copy.text(
+                                                  'Cheer for someone else')
                                               : _voted
-                                                  ? 'Ballot submitted'
+                                                  ? _copy
+                                                      .text('Ballot submitted')
                                                   : !_registered
-                                                      ? 'Join to vote'
+                                                      ? _copy
+                                                          .text('Join to vote')
                                                       : !_voting
-                                                          ? 'Voting is ${_contest!.stage == ContestStage.registration ? 'not open yet' : 'closed'}'
+                                                          ? _copy.text(_contest!
+                                                                      .stage ==
+                                                                  ContestStage
+                                                                      .registration
+                                                              ? 'Voting is not open yet'
+                                                              : 'Voting is closed')
                                                           : selected
-                                                              ? 'Selected · tap to remove'
+                                                              ? _copy.text(
+                                                                  'Selected · tap to remove')
                                                               : atLimit
-                                                                  ? 'Three selected already'
-                                                                  : 'Add to my ballot',
+                                                                  ? _copy.text(
+                                                                      'Three selected already')
+                                                                  : _copy.text(
+                                                                      'Add to my ballot'),
                                           style: TextStyle(
                                               fontSize: 11,
                                               fontWeight: FontWeight.w600,
@@ -1051,7 +1124,9 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                          Text('${_selected.length} of 3 selected',
+                          Text(
+                              _copy.text('{count} of 3 selected',
+                                  {'count': _selected.length}),
                               style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w700,
@@ -1059,8 +1134,12 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                           const SizedBox(height: 4),
                           Text(
                               _selected.length == 3
-                                  ? 'Ready for a final look.'
-                                  : 'Pick ${3 - _selected.length} more ${_selected.length == 2 ? 'costume' : 'costumes'}.',
+                                  ? _copy.text('Ready for a final look.')
+                                  : _copy.text(
+                                      _selected.length == 2
+                                          ? 'Pick {count} more costume.'
+                                          : 'Pick {count} more costumes.',
+                                      {'count': 3 - _selected.length}),
                               style: const TextStyle(
                                   color: Color(0xFFB8C8BE), fontSize: 11))
                         ])),
@@ -1079,8 +1158,8 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
                         child: _busy
                             ? _spinner()
                             : Text(narrow
-                                ? 'Review votes →'
-                                : 'Review my three votes →')),
+                                ? _copy.text('Review votes →')
+                                : _copy.text('Review my three votes →'))),
                   ])))));
 
   Widget _setupView() => Padding(
@@ -1089,11 +1168,12 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Icon(Icons.auto_awesome, size: 40),
         const SizedBox(height: 20),
-        const Text('The party is taking shape.',
+        Text(_copy.flavour('setupHeading'),
             style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
         const SizedBox(height: 15),
-        const Text(
-            'This copy is not connected to a contest yet. You can explore a preview with sample entries while the host finishes setup.',
+        Text(
+            _copy.text(
+                'This copy is not connected to a contest yet. You can explore a preview with sample entries while the host finishes setup.'),
             style: TextStyle(fontSize: 16, height: 1.7, color: muted)),
         const SizedBox(height: 24),
         FilledButton(
@@ -1104,26 +1184,33 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
               });
               _load();
             },
-            child: const Text('Explore the preview')),
+            child: Text(_copy.text('Explore the preview'))),
       ])));
 }
 
 Widget _spinner() => const SizedBox(
     width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2));
 
-Widget _errorNotice(String message, {VoidCallback? onRetry}) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-        color: const Color(0xFFF9E6DC),
-        borderRadius: BorderRadius.circular(14)),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Icon(Icons.info_outline, size: 20),
-      const SizedBox(width: 10),
-      Expanded(child: Text(message, style: const TextStyle(height: 1.5))),
-      if (onRetry != null)
-        TextButton(onPressed: onRetry, child: const Text('Retry')),
-    ]));
+Widget _errorNotice(BuildContext context, String message,
+        {VoidCallback? onRetry}) =>
+    Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: const Color(0xFFF9E6DC),
+            borderRadius: BorderRadius.circular(14)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.info_outline, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(
+                  AppLanguageScope.of(context).copy.translateError(message),
+                  style: const TextStyle(height: 1.5))),
+          if (onRetry != null)
+            TextButton(
+                onPressed: onRetry,
+                child: Text(AppLanguageScope.of(context).copy.text('Retry'))),
+        ]));
 
 class HostPage extends StatefulWidget {
   const HostPage({required this.service, super.key});
@@ -1133,6 +1220,7 @@ class HostPage extends StatefulWidget {
 }
 
 class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
+  AppCopy get _copy => AppLanguageScope.of(context).copy;
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _title = TextEditingController();
@@ -1229,25 +1317,26 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
         context: context,
         builder: (context) => AlertDialog(
                 title: Text(switch (stage) {
-                  ContestStage.registration => 'Reopen registration?',
-                  ContestStage.voting => 'Open the ballot?',
-                  ContestStage.closed => 'Close voting?',
+                  ContestStage.registration =>
+                    _copy.text('Reopen registration?'),
+                  ContestStage.voting => _copy.text('Open the ballot?'),
+                  ContestStage.closed => _copy.text('Close voting?'),
                 }),
                 content: Text(switch (stage) {
-                  ContestStage.registration =>
-                    'Voting will pause so more guests can enter. This is possible only before the first ballot is submitted.',
-                  ContestStage.voting =>
-                    'Registration will close. Entrants will each be able to submit one ballot with three votes. Make sure everyone has entered.',
-                  ContestStage.closed =>
-                    'No more ballots will be accepted. Your results will remain private.',
+                  ContestStage.registration => _copy.text(
+                      'Voting will pause so more guests can enter. This is possible only before the first ballot is submitted.'),
+                  ContestStage.voting => _copy.text(
+                      'Registration will close. Entrants will each be able to submit one ballot with three votes. Make sure everyone has entered.'),
+                  ContestStage.closed => _copy.text(
+                      'No more ballots will be accepted. Your results will remain private.'),
                 }),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel')),
+                      child: Text(_copy.text('Cancel'))),
                   FilledButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Confirm'))
+                      child: Text(_copy.text('Confirm')))
                 ]));
     if (confirmed != true || !mounted) return;
     await _action(() async {
@@ -1260,17 +1349,19 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
     final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-                title: Text('Delete ${costume.username}’s entry?'),
+                title: Text(_copy.text(
+                    'Delete {name}’s entry?', {'name': costume.username})),
                 scrollable: true,
-                content: Text('Remove “${costume.title}” from the contest? '
-                    'This cannot be undone. They can register again while registration is open.'),
+                content: Text(_copy.text(
+                    'Remove “{costume}” from the contest? This cannot be undone. They can register again while registration is open.',
+                    {'costume': costume.title})),
                 actions: [
                   TextButton(
                       onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Keep entry')),
+                      child: Text(_copy.text('Keep entry'))),
                   FilledButton(
                       onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Delete entry')),
+                      child: Text(_copy.text('Delete entry'))),
                 ]));
     if (confirmed != true || !mounted) return;
     await _action(() async {
@@ -1286,9 +1377,12 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
             backgroundColor: paper,
-            title: const Text('The host’s room',
+            title: Text(_copy.flavour('hostHeading'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20)),
             actions: [
+              const LanguageSwitcher(),
               if (_snapshot != null)
                 TextButton(
                     onPressed: _busy
@@ -1306,7 +1400,7 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
                               });
                             }
                           },
-                    child: const Text('Sign out')),
+                    child: Text(_copy.text('Sign out'))),
               const SizedBox(width: 12)
             ]),
         body: SafeArea(
@@ -1323,15 +1417,17 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
                       Padding(
                           padding: const EdgeInsets.only(bottom: 20),
                           child: _errorNotice(
-                              'Preview only. All names and votes here are sample data.')),
+                              context,
+                              _copy.text(
+                                  'Preview only. All names and votes here are sample data.'))),
                     if (_error != null)
                       Padding(
                           padding: const EdgeInsets.only(bottom: 20),
-                          child: _errorNotice(_error!)),
+                          child: _errorNotice(context, _error!)),
                     if (_notice != null)
                       Padding(
                           padding: const EdgeInsets.only(bottom: 20),
-                          child: Text(_notice!)),
+                          child: Text(_copy.translateError(_notice!))),
                     if (_snapshot == null) _loginPanel() else ..._dashboard(),
                   ])),
         )))),
@@ -1343,35 +1439,36 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
             alignment: Alignment.centerLeft,
             child: Icon(Icons.lock_outline, size: 34)),
         const SizedBox(height: 20),
-        const Text('Just for you.',
+        Text(_copy.flavour('hostLoginHeading'),
             style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
-        const Text(
-            'Manage the party and see the totals. Individual voting choices never appear in this view.',
+        Text(
+            _copy.text(
+                'Manage the party and see the totals. Individual voting choices never appear in this view.'),
             style: TextStyle(color: muted, height: 1.65)),
         const SizedBox(height: 24),
         if (widget.service.isDemo)
           FilledButton(
               onPressed: _busy ? null : _login,
-              child: const Text('Open the demo host view'))
+              child: Text(_copy.text('Open the demo host view')))
         else ...[
           TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
               autocorrect: false,
               enabled: !_busy,
-              decoration: const InputDecoration(labelText: 'Host email')),
+              decoration: InputDecoration(labelText: _copy.text('Host email'))),
           const SizedBox(height: 14),
           TextField(
               controller: _password,
               obscureText: true,
               enabled: !_busy,
               onSubmitted: (_) => _login(),
-              decoration: const InputDecoration(labelText: 'Password')),
+              decoration: InputDecoration(labelText: _copy.text('Password'))),
           const SizedBox(height: 18),
           FilledButton(
               onPressed: _busy ? null : _login,
-              child: _busy ? _spinner() : const Text('Sign in securely')),
+              child: _busy ? _spinner() : Text(_copy.text('Sign in securely'))),
         ],
       ]));
 
@@ -1386,36 +1483,39 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
       ..sort((a, b) => b.votes.compareTo(a.votes));
     return [
       Row(children: [
-        const Expanded(
-            child: Text('Behind the curtain.',
+        Expanded(
+            child: Text(_copy.flavour('hostDashboardHeading'),
                 style: TextStyle(
                     fontSize: 31,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -1))),
         IconButton(
             onPressed: _busy ? null : () => _action(_refresh),
-            tooltip: 'Refresh results',
+            tooltip: _copy.text('Refresh results'),
             icon: const Icon(Icons.refresh))
       ]),
       const SizedBox(height: 10),
-      const Text('Totals for your eyes only. No voter-by-voter breakdown.',
+      Text(
+          _copy.text('Totals for your eyes only. No voter-by-voter breakdown.'),
           style: TextStyle(color: muted, height: 1.6)),
       const SizedBox(height: 25),
       Wrap(spacing: 14, runSpacing: 14, children: [
-        _stat('${data.registeredCount}', 'Costumes entered'),
-        _stat('${data.ballotCount}', 'Ballots received'),
-        _stat('${data.ballotCount * 3}', 'Votes cast'),
+        _stat('${data.registeredCount}', _copy.text('Costumes entered')),
+        _stat('${data.ballotCount}', _copy.text('Ballots received')),
+        _stat('${data.ballotCount * 3}', _copy.text('Votes cast')),
       ]),
       const SizedBox(height: 24),
       _panel(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Contest · ${data.stage.label}',
+        Text(
+            _copy.text(
+                'Contest · {stage}', {'stage': _copy.text(data.stage.label)}),
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
         const SizedBox(height: 20),
         TextField(
             controller: _title,
             enabled: !_busy,
             maxLength: 80,
-            decoration: const InputDecoration(labelText: 'Contest name')),
+            decoration: InputDecoration(labelText: _copy.text('Contest name'))),
         Align(
             alignment: Alignment.centerLeft,
             child: TextButton(
@@ -1428,29 +1528,38 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
                             setState(() => _notice = 'Contest name updated.');
                           }
                         }),
-                child: const Text('Save contest name'))),
+                child: Text(_copy.text('Save contest name')))),
         const Divider(height: 32, color: line),
         if (data.revealAt != null) ...[
-          Text('Costume reveal · ${_revealLabel(data.revealAt!)}',
+          Text(
+              _copy.text('Costume reveal · {date}',
+                  {'date': _copy.revealLabel(data.revealAt!)}),
               style: const TextStyle(fontWeight: FontWeight.w600, height: 1.5)),
           const SizedBox(height: 8),
           Text(
               data.revealPending
-                  ? 'Guests can keep their costume name secret until then. You can see every costume here.'
-                  : 'The reveal time has passed. All costume names are now visible to guests.',
+                  ? _copy.text(
+                      'Guests can keep their costume name secret until then. You can see every costume here.')
+                  : _copy.text(
+                      'The reveal time has passed. All costume names are now visible to guests.'),
               style: const TextStyle(color: muted, height: 1.6)),
           const SizedBox(height: 16),
         ],
         Text(
             data.stage == ContestStage.registration
-                ? 'Give everyone time to enter. At least four costumes are needed so each person has three others to choose from.'
+                ? _copy.text(
+                    'Give everyone time to enter. At least four costumes are needed so each person has three others to choose from.')
                 : data.stage == ContestStage.voting
-                    ? 'Voting is live. Close the ballot when everyone has had a chance to vote.'
-                    : 'The ballot is closed. You can announce the results whenever you’re ready.',
+                    ? _copy.text(
+                        'Voting is live. Close the ballot when everyone has had a chance to vote.')
+                    : _copy.text(
+                        'The ballot is closed. You can announce the results whenever you’re ready.'),
             style: const TextStyle(color: muted, height: 1.6)),
         const SizedBox(height: 16),
         if (waitingForReveal) ...[
-          const Text('Voting can open after the secret costumes are revealed.',
+          Text(
+              _copy.text(
+                  'Voting can open after the secret costumes are revealed.'),
               style: TextStyle(color: muted, height: 1.5)),
           const SizedBox(height: 12),
         ],
@@ -1459,47 +1568,52 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
               onPressed: _busy || data.registeredCount < 4 || waitingForReveal
                   ? null
                   : () => _changeStage(ContestStage.voting),
-              child: const Text('Close registration & open voting')),
+              child: Text(_copy.text('Close registration & open voting'))),
         if (data.stage == ContestStage.voting)
           FilledButton(
               onPressed: _busy ? null : () => _changeStage(ContestStage.closed),
-              child: const Text('Close voting')),
+              child: Text(_copy.text('Close voting'))),
         if (data.stage != ContestStage.registration && data.ballotCount == 0)
           TextButton(
               onPressed:
                   _busy ? null : () => _changeStage(ContestStage.registration),
-              child: const Text('Reopen registration')),
+              child: Text(_copy.text('Reopen registration'))),
         if (data.stage == ContestStage.closed)
           OutlinedButton(
               onPressed: _busy || waitingForReveal
                   ? null
                   : () => _changeStage(ContestStage.voting),
-              child: const Text('Resume voting')),
+              child: Text(_copy.text('Resume voting'))),
       ])),
       const SizedBox(height: 24),
       _panel(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        const Row(children: [
+        Row(children: [
           Icon(Icons.emoji_events_outlined, size: 25),
           SizedBox(width: 10),
           Expanded(
-              child: Text('The results',
+              child: Text(_copy.text('The results'),
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)))
         ]),
         const SizedBox(height: 12),
-        const Text(
-            'Equal vote totals are a tie. Each submitted ballot contributes three votes.',
+        Text(
+            _copy.text(
+                'Equal vote totals are a tie. Each submitted ballot contributes three votes.'),
             style: TextStyle(color: muted, height: 1.6)),
         const SizedBox(height: 8),
         Text(
             canDelete
-                ? 'You can delete an entry below while registration is open.'
+                ? _copy.text(
+                    'You can delete an entry below while registration is open.')
                 : data.ballotCount > 0
-                    ? 'Entry deletion is locked because voting has started.'
-                    : 'Reopen registration to delete an entry before anyone votes.',
+                    ? _copy.text(
+                        'Entry deletion is locked because voting has started.')
+                    : _copy.text(
+                        'Reopen registration to delete an entry before anyone votes.'),
             style: const TextStyle(color: muted, height: 1.6)),
         const SizedBox(height: 24),
         if (results.isEmpty)
-          const Text('Results will appear here once costumes are entered.'),
+          Text(_copy
+              .text('Results will appear here once costumes are entered.')),
         ...results.map((c) => Padding(
             padding: const EdgeInsets.only(bottom: 24),
             child:
@@ -1515,7 +1629,9 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
               ]),
               if (c.titleHidden && data.revealAt != null) ...[
                 const SizedBox(height: 8),
-                Text('Secret until ${_revealLabel(data.revealAt!)}',
+                Text(
+                    _copy.text('Secret until {date}',
+                        {'date': _copy.revealLabel(data.revealAt!)}),
                     style: const TextStyle(
                         color: muted, fontSize: 12, height: 1.5)),
               ],
@@ -1534,7 +1650,8 @@ class _HostPageState extends State<HostPage> with WidgetsBindingObserver {
                         key: ValueKey('delete-${c.id}'),
                         onPressed: _busy ? null : () => _deleteEntry(c),
                         icon: const Icon(Icons.delete_outline, size: 18),
-                        label: Text('Delete ${c.username}’s entry'))),
+                        label: Text(_copy.text(
+                            'Delete {name}’s entry', {'name': c.username})))),
             ]))),
       ])),
       const SizedBox(height: 40),

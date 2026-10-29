@@ -1,0 +1,78 @@
+Deine deutschen Flavour-Texte
+
+Trage deine Formulierungen jeweils hinter „Deutsch:“ ein oder schicke sie im Chat.
+Du kannst einzelne Texte ersetzen; offene Stellen bleiben vorerst auf Englisch.
+Die neutralen Anleitungen und Schaltflächen sind bereits separat übersetzt.
+
+1. Startseite – Überschrift für neue Gäste
+Englisch: A little disguise. A lot of glory.
+Deutsch:
+
+2. Überschrift nach der Anmeldung
+Englisch: Who wore it best?
+Deutsch:
+
+3. Überschrift nach der Stimmabgabe
+Englisch: Good taste. Great choices.
+Deutsch:
+
+4. Einführung auf der Startseite
+Englisch: Bring your alter ego. Meet the contenders. Give your three favourites a moment in the spotlight.
+Deutsch:
+
+5. Fußzeile
+Englisch: A good costume deserves a little applause. {contest} · Made for a memorable night.
+Deutsch:
+Hinweis: {contest} wird durch den Namen deines Wettbewerbs ersetzt.
+
+6. Kleine Überschrift über der Anmeldung
+Englisch: YOUR MOMENT
+Deutsch:
+
+7. Überschrift beim Eingeben des Namens
+Englisch: Let’s get you in.
+Deutsch:
+
+8. Überschrift beim Eingeben des Kostüms
+Englisch: Meet your alter ego.
+Deutsch:
+
+9. Erste Regel – Überschrift
+Englisch: Make it a trio
+Deutsch:
+
+10. Zweite Regel – Überschrift
+Englisch: Share the spotlight
+Deutsch:
+
+11. Dritte Regel – Überschrift
+Englisch: Keep the suspense
+Deutsch:
+
+12. Teilnehmerliste – Überschrift
+Englisch: Quite the cast.
+Deutsch:
+
+13. Teilnehmerliste – Einführung
+Englisch: Big ideas. Excellent disguises. Meet tonight’s lineup.
+Deutsch:
+
+14. Überschrift bei leerer Teilnehmerliste
+Englisch: The stage is yours.
+Deutsch:
+
+15. Überschrift während der Einrichtung
+Englisch: The party is taking shape.
+Deutsch:
+
+16. Titel des Orga-Bereichs
+Englisch: The host’s room
+Deutsch:
+
+17. Überschrift der Orga-Anmeldung
+Englisch: Just for you.
+Deutsch:
+
+18. Überschrift der Orga-Übersicht
+Englisch: Behind the curtain.
+Deutsch:

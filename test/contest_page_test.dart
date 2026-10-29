@@ -64,12 +64,14 @@ void main() {
     expect(find.text('Mitmachen'), findsOneWidget);
     expect(find.text('Your name'), findsNothing);
     expect(find.text('Join the party'), findsNothing);
-    expect(find.text('A little disguise.\nA lot of glory.'), findsOneWidget);
+    expect(find.text('Du siehst heute irgendwie anders aus.'), findsOneWidget);
+    expect(find.text('A little disguise.\nA lot of glory.'), findsNothing);
     expect(tester.takeException(), isNull);
     await switchLanguage(tester, 'English');
     expect(appLocale(tester).languageCode, 'en');
     expect(find.text('Your name'), findsOneWidget);
     expect(find.text('Join the party'), findsOneWidget);
+    expect(find.text('A little disguise.\nA lot of glory.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
@@ -104,12 +106,29 @@ void main() {
         isFalse);
     await switchLanguage(tester, 'Deutsch');
     expect(appLocale(tester).languageCode, 'de');
+    expect(find.text('Taylor Moon auf die Bühne'), findsOneWidget);
     expect(find.text('Paper Dragon'), findsOneWidget);
     expect(find.text('Your costume'), findsNothing);
+    final germanNameField =
+        find.widgetWithText(TextFormField, 'Dein Name / Spitzname');
+    await tester.ensureVisible(germanNameField);
+    await tester.enterText(germanNameField, 'Taylor Star');
+    await tester.pump();
+    expect(find.text('Taylor Star auf die Bühne'), findsOneWidget);
+    expect(find.text('Taylor Moon auf die Bühne'), findsNothing);
     expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
         isFalse);
     expect(tester.takeException(), isNull);
     await switchLanguage(tester, 'English');
+    expect(find.text('Meet your alter ego.'), findsOneWidget);
+    expect(find.text('Taylor Star auf die Bühne'), findsNothing);
+    expect(
+        tester
+            .widget<TextFormField>(
+                find.widgetWithText(TextFormField, 'Your name / nickname'))
+            .controller!
+            .text,
+        'Taylor Star');
     expect(
         tester
             .widget<TextFormField>(
@@ -121,7 +140,7 @@ void main() {
     await tapText(tester, 'Yes, that’s me');
     final registered = (await service.fetchContest())
         .costumes
-        .singleWhere((costume) => costume.username == 'Taylor Moon');
+        .singleWhere((costume) => costume.username == 'Taylor Star');
     expect(registered.title, 'Paper Dragon');
     expect(registered.titleHidden, isFalse);
     expect(tester.takeException(), isNull);

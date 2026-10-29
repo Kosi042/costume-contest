@@ -2,28 +2,29 @@ import 'package:flutter/material.dart';
 
 enum AppLanguage { german, english }
 
-/// German flavour copy is intentionally left for the event host to write.
-/// Replace any null below with your German wording. Keep {name} and {contest}
-/// placeholders where present. Until then, that item uses englishFlavourCopy.
+/// German flavour copy supplied by the event host in German-Flavour-Text.txt.
+/// Keep {name} and {contest} placeholders where present. A null value falls
+/// back to englishFlavourCopy if a future translation is not yet available.
 const germanFlavourCopy = <String, String?>{
-  'heroNew': null,
-  'heroReady': null,
-  'heroVoted': null,
-  'heroIntroduction': null,
-  'footer': null,
-  'joinEyebrow': null,
-  'joinHeading': null,
-  'registrationHeading': null,
-  'ruleThreeHeading': null,
-  'ruleOthersHeading': null,
-  'rulePrivateHeading': null,
-  'lineupHeading': null,
-  'lineupIntroduction': null,
-  'emptyLineupHeading': null,
-  'setupHeading': null,
-  'hostHeading': null,
-  'hostLoginHeading': null,
-  'hostDashboardHeading': null,
+  'heroNew': 'Du siehst heute irgendwie anders aus.',
+  'heroReady': '1, 2 und 3 letzte Chance?',
+  'heroVoted': 'Vorbei!',
+  'heroIntroduction': 'Gruselig, witzig oder einfach gut. Die Qual der Wahl.',
+  'footer':
+      'Gute Kostüme verdienen Applaus. {contest} · Wer sich erinnern kann, war nicht dabei.',
+  'joinEyebrow': 'DEIN AUFTRITT',
+  'joinHeading': 'Willkommen',
+  'registrationHeading': '{name} auf die Bühne',
+  'ruleThreeHeading': 'Alle guten Dinge sind drei',
+  'ruleOthersHeading': 'Teil das Rampenlicht',
+  'rulePrivateHeading': 'GG Art. 38',
+  'lineupHeading': 'Die Bühne betreten:',
+  'lineupIntroduction': 'Ich hab die Eher heute vorzustellen:',
+  'emptyLineupHeading': 'Bühne frei für ...',
+  'setupHeading': 'Jetzt ist hier im Haus richtig Rambo Zambo',
+  'hostHeading': 'Wahlhelfer',
+  'hostLoginHeading': 'Nur für befugtes Personal',
+  'hostDashboardHeading': 'Hinter den Kulissen',
 };
 
 const englishFlavourCopy = <String, String>{

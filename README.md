@@ -12,7 +12,7 @@ Names are compared after normalizing capitalization and extra spaces, so changin
 
 Registration is open now. **Keep my costume secret** is selected by default: the guest's name stays visible, while their costume title stays hidden until the reveal time displayed on the website. Guests can uncheck it. The planned event deadline is **31 October 2026 at 20:00 CET (19:00 UTC)**; a temporary reveal test can use an earlier deadline in the database. The host can see all costume titles. The server controls the reveal, and open pages refresh automatically at the deadline. Voting remains a host action and cannot open while any secret costume is still hidden.
 
-The interface opens in **German**, with a **DE / EN** language chooser in both guest and host views. Switching language preserves the current entry form, selected votes, and host session. Neutral instructions and controls are translated; German flavour text remains editable separately and falls back to the original English until the organizer supplies wording. Names and costume titles entered by guests are never translated.
+The interface opens in **German**, with a **DE / EN** language chooser in both guest and host views. Switching language preserves the current entry form, selected votes, and host session. Neutral instructions and controls are translated; the German flavour text uses the organizer's wording. The costume-entry heading includes the guest's name and follows edits to the name field. Names and costume titles entered by guests are never translated.
 
 Write German flavour wording in [German-Flavour-Text.txt](German-Flavour-Text.txt). The corresponding optional overrides are in `germanFlavourCopy` in `lib/app_language.dart`.
 

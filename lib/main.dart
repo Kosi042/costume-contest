@@ -678,8 +678,15 @@ class _ContestPageState extends State<ContestPage> with WidgetsBindingObserver {
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Icon(Icons.theater_comedy_outlined, size: 32),
         const SizedBox(height: 15),
-        Text(_copy.flavour('registrationHeading'),
-            style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700)),
+        ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _nameController,
+            builder: (context, value, child) {
+              final draftName = value.text.trim();
+              return Text(
+                  _copy.flavour('registrationHeading',
+                      {'name': draftName.isEmpty ? _username : draftName}),
+                  style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700));
+            }),
         const SizedBox(height: 10),
         if (_contest!.stage != ContestStage.registration) ...[
           Text(
